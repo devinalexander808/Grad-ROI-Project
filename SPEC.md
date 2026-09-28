@@ -1,24 +1,108 @@
-# Grad Program ROI — Product Spec v0.3
+# Pathfinder — Product Spec v1.0
 
-Owner: Devin Alexander · Course: AI-Assisted Application Development · Date: Sept 9, 2026 (v0.3: model formulas finalized to match the test workbook)
+Owner: Devin Alexander · Course: AI-Assisted Application Development · Date: Sept 28, 2026
+Supersedes: Grad Program ROI spec v0.3 (its model and Scorecard sections are carried forward unchanged as Appendix A).
 
 ## 1. One-sentence pitch
 
-An honest financial model that tells a person whether a specific graduate program pays off for them, using real earnings data and their own numbers, with the uncertainty shown instead of hidden.
+You name the job you want; Pathfinder shows you how to get there, what it costs, whether the market wants that job right now, and what to do next — then keeps watching the market for you.
 
-## 2. User
+## 2. Problem
 
-A college senior or young professional deciding between (a) enrolling in a specific graduate program and (b) continuing to work. They know their salary and savings; they do not know finance. Secondary users (later): university career centers, employers with tuition reimbursement.
+People pick careers and pay for degrees on hunches. The facts they'd need — how many of these jobs exist, what they pay, whether the field is growing, what employers actually ask for, what a program costs and what its graduates earn — are all public but scattered across five government sites and a hundred job boards. Nobody assembles them per person, and nobody keeps them current after the decision is made.
 
-## 3. Core promise (what the app does that a chatbot or spreadsheet does not)
+## 3. User
 
-1. Pulls real per-program earnings and debt data from the federal College Scorecard rather than guessing.
-2. Combines it with the user's own salary, savings, and loan terms in a consistent model.
-3. Shows results as scenarios and breakeven conditions, never a single "worth it" verdict.
-4. Labels every number with where it came from and how confident we are.
-5. Remembers the user's programs and offers so the comparison updates as the decision unfolds.
+Primary: a college senior or early-career person (roughly 20–30) with a target job in mind and a question about how to reach it. Works for anyone deciding between "go back to school" and "get there another way." Secondary (later): university career offices.
 
-## 4. Inputs
+## 4. What it does, in reading order
+
+Every screen answers the same question from a different angle. The user enters two things to start: **the job they want** (occupation search, mapped to a federal SOC code) and **where they are** (state or metro). Everything else is optional and pre-filled.
+
+### 4.1 The job right now
+- How many people do this job, median pay, pay range (10th–90th percentile), and projected growth over ten years — national and for the user's state. Source: BLS OEWS and Employment Projections (Appendix B).
+- Typical entry education and whether a license or certification is usually required. Source: BLS/O*NET.
+- Live demand: number of postings for this title in the user's region in the last 30 days, and the median advertised salary. Source: Adzuna postings API.
+- One plain-language line generated from the numbers, e.g. "Financial analysts: 350,000 jobs nationally, growing about as fast as average, 140 openings near San Luis Obispo this month."
+
+### 4.2 The path
+- Two or three routes to the target job, side by side: (a) the graduate program route, (b) certification plus a stepping-stone role, (c) apply now. Each route shows time to target, out-of-pocket cost, and expected pay at each step.
+- Route (a) uses the existing ROI model (Appendix A) with Scorecard data for the program: payback year, NPV, breakeven starting salary, cumulative-cash chart. This is the current app, embedded as one card.
+- Stepping-stone roles come from O*NET's related-occupations and typical-career-ladder data; the user can edit the path.
+- Every number carries its source and a confidence label (Appendix A3 ladder).
+
+### 4.3 The news
+- The 5–8 most relevant articles from the last 60 days about this occupation and its industry, filtered to the user's region when available. Source: NewsAPI (or GDELT as the free fallback).
+- AI summary, three fixed headings, two sentences each: **Demand** (hiring, layoffs, openings), **Pay** (raises, comp trends), **Technology and AI** (what is being automated, what is being reported). Each sentence links to the article it came from. The summary states what was reported; it does not render a verdict on whether AI will take the job.
+
+### 4.4 Next moves
+- Skills and credentials ranked by how often they appear in current postings for the target job: "SQL appears in 62% of postings, Python 41%, CFA 18%." Source: Adzuna posting text, counted server-side.
+- Top hiring employers in the region by posting count.
+- The cheapest program that satisfies the typical education requirement, from Scorecard.
+- AI-written paragraph that turns the above into three concrete actions, citing only numbers on screen.
+
+### 4.5 Saved paths and weekly alerts (the retention feature)
+- A signed-in user saves a path (target job + region + chosen route). Supabase stores it.
+- A scheduled job runs weekly: re-pulls postings count, median advertised salary, and news for each saved path; stores a snapshot.
+- If postings moved more than 15% or a new article matches, the user gets an email: "Openings for financial analyst near SLO: 140 → 95 (−32%) this month. 2 new articles." Email via Resend.
+- The saved-path page shows the history as a small chart: postings and advertised salary over time. This is the app's own data and grows the longer someone uses it.
+
+## 5. What the AI does and does not do
+- Does: summarize news under fixed headings with citations; write the "next moves" paragraph from on-screen numbers; map free-text job titles to SOC codes when search is ambiguous.
+- Does not: predict salaries, predict whether AI will replace a job, rate programs, or produce any number that is not traceable to a source or the ROI model.
+
+## 6. Design rules
+- One page per section, four cards on the home screen, details one click deep. Never more than six numbers visible on a card.
+- Every figure: value, source, as-of date, confidence label. Hover or tap reveals the source.
+- Plain language everywhere; define a term once where it first appears.
+- Blank states are honest: "No postings data for this region; showing national" rather than a zero.
+
+## 7. Stack
+Next.js (App Router) + TypeScript · Supabase (auth, Postgres, cached API responses, saved paths, weekly snapshots) · Vercel (hosting + cron for the weekly job) · Recharts · Claude API for summaries · Resend for email. All external keys in environment variables. Cache every external response with a timestamp; the UI reads the cache, and a refresh job updates it, so the app stays fast and within free-tier rate limits.
+
+## 8. Schedule against course milestones
+- **Week 6 — MVP turn-in (Oct 5):** the existing ROI calculator, deployed on Vercel, plus section 4.1 for one occupation pulled live from BLS. Demonstrates the primary workflow: pick a job, see the market, see the money.
+- **Week 7:** occupation search mapped to SOC codes; BLS state-level data; Adzuna postings count and salary; caching layer.
+- **Week 8:** the path screen (4.2) with the ROI card embedded and Scorecard lookup wired in with the fallback ladder.
+- **Week 9:** news feed and AI summary (4.3); next moves with posting-skill counts (4.4); deploy.
+- **Week 10 — peer testing:** classmates enter their own target job; capture confusion and missing data cases.
+- **Week 11:** accounts, saved paths, weekly job, email alerts (4.5); fixes from testing.
+- **Week 12 — final product:** polish, honest blank states, source labels everywhere, final deploy.
+- **Week 13 — presentation:** open on the home screen for one job, walk the four cards, end on the alerts chart.
+
+## 9. Out of scope (v1)
+Resume matching · cover letters · applying to jobs · interview prep · non-U.S. jobs · Reddit/Glassdoor sentiment · salary negotiation · multiple regions at once · comparing two target jobs (v2).
+
+## 10. Risks and the plan for each
+
+Verified Sept 28, 2026 (live calls from Devin's machine):
+
+- **BLS OEWS API — works, no key needed.** `POST https://api.bls.gov/publicAPI/v2/timeseries/data/` with `{"seriesid":[...]}`. Series ID format confirmed: `OEU` + area type (`N` national, `S` state, `M` metro) + 7-digit area code (`0000000` national, `0600000` California, `0042200` San Luis Obispo MSA) + 6-digit industry (`000000` all) + 6-digit SOC without hyphen (`132051` financial analysts) + 2-digit data type (`01` employment, `04` annual mean wage, `13` annual median wage). Latest year is 2025 (the "no data 2023/2024" messages are noise; ignore). Financial analysts: national employment 361,980, median $102,740, mean $116,800; California employment 45,380, median $109,110; SLO metro median $97,720. Unregistered use is capped at 25 queries/day and 25 series per query — register a free key (500/day, 50 per query) and cache.
+- **GDELT news API — works but rough.** Free, no key, one request per 5 seconds enforced; a bare occupation query returns loosely related business news (a "financial analyst" search returned stock-pick articles and local business features). Needs tight query phrasing (title + "hiring" / "jobs" / "layoffs", plus industry terms) and AI relevance filtering before summarizing. Treat as fallback; prefer NewsAPI once a key exists.
+- **Not yet tested (need free registration):** O*NET Web Services (occupation search, related roles), Adzuna (postings and salary), NewsAPI. First task of week 7: register all three and repeat this check. Adzuna is the one the "next moves" skill counts depend on; if its free tier is too thin, fall back to O*NET's skills list for the occupation (static but authoritative).
+- **Job title to SOC mapping is fuzzy.** Use O*NET's title crosswalk first; fall back to an AI suggestion the user confirms. Seed a lookup table of the 50 most common target titles.
+- **Scorecard gaps (only ~1/3 of graduate programs have earnings).** Fallback ladder in A3; label the level used.
+- **API limits or outages during a demo.** The UI never calls an external API directly; a refresh job fills a Supabase cache and the pages read from it. Seed the cache with 20 common occupations so demos never depend on a live call.
+- **Scope creep.** Each week ships one section. Nothing from section 9 gets built before week 12.
+
+---
+
+## Appendix B — Labor market and news data sources
+
+- **BLS OEWS** (Occupational Employment and Wage Statistics): employment count, median and percentile wages by SOC code, national and by state/metro. Public API v2 at `https://api.bls.gov/publicAPI/v2/timeseries/data/` with a free registration key; series IDs encode area + occupation + data type. Annual release (May reference). Confirm exact series-ID format against the BLS docs before coding; if the API proves awkward, the annual OEWS flat files are downloadable and can be loaded into Supabase once.
+- **BLS Employment Projections**: 10-year projected growth and typical entry education per occupation; published as downloadable tables (no live API needed — load once per year).
+- **O*NET Web Services** (`https://services.onetcenter.org/`): occupation search, related occupations, tasks and skills, education requirements; free API key.
+- **Adzuna Jobs API** (`https://api.adzuna.com/v1/api/jobs/us/search/`): postings by title and location, count and salary histogram; free developer tier with daily call limits — cache and refresh weekly.
+- **NewsAPI** (`https://newsapi.org/`): keyword news search; free developer tier (delayed, limited results). Fallback: GDELT 2.0 doc API, free and unlimited but noisier.
+- **College Scorecard**: see Appendix A3.
+
+All sources are U.S. federal or free-tier commercial; none require scraping.
+
+---
+
+## Appendix A — ROI model and Scorecard data (carried forward from Grad ROI spec v0.3)
+
+## A1. ROI model inputs
 
 **About you (Path A baseline)**
 - `S0` current (or offered) annual salary, pre-tax
@@ -43,7 +127,7 @@ A college senior or young professional deciding between (a) enrolling in a speci
 - `r` interest rate (default 8%), `N` term in years (default 10)
 - Payments start when the program ends (grace period ignored in v1; note it in provenance)
 
-## 5. Model (annual steps, year k = 1 … H, after-tax cash)
+## A2. ROI model (annual steps, year k = 1 … H, after-tax cash)
 
 **Path A — keep working**
 
@@ -85,7 +169,7 @@ A college senior or young professional deciding between (a) enrolling in a speci
 - Round only for display; keep full precision in the model.
 - The model is a pure function (inputs → outputs) with unit tests against hand-verified cases. Ship no UI feature that changes the model without a test.
 
-## 6. Data: College Scorecard
+## A3. Data: College Scorecard
 
 - Source: U.S. Dept. of Education College Scorecard API (free key via api.data.gov; key lives in an env var, never in the repo).
 - Endpoint: `GET https://api.data.gov/ed/collegescorecard/v1/schools?api_key=…&school.name=<name>&fields=id,school.name,latest.programs.cip_4_digit&all_programs_nested=true`
@@ -114,37 +198,3 @@ A college senior or young professional deciding between (a) enrolling in a speci
 - Confidence label on every figure: **High** (level 1, cohort n not suppressed), **Medium** (levels 2–3), **Low** (level 4), **Your input** (level 5 or any override).
 - Cache Scorecard responses in the database; refresh monthly.
 
-## 7. Screens
-
-1. **Start** — five fields (salary, raise rate, tax rate, horizon, discount rate) with defaults pre-filled. One button: "Add a program."
-2. **Add a program** — search school and program; app fills what Scorecard knows; user fills tuition, length, scholarships, loans. Provenance shown inline as fields populate.
-3. **Compare** — the main screen. Cards per program: payback year, NPV, breakeven salary vs. typical salary. Scenario toggle (base / pessimistic / optimistic). Cumulative cash chart. "Keep working" always shown as the baseline.
-4. **Program detail** — every number, its source, its confidence, and an "edit" to override. This is the honesty screen.
-5. **Workspace** — saved programs and offers; edit a scholarship and everything recomputes. Requires an account (Supabase auth).
-6. **Memo (v2)** — AI-written one-page summary of the comparison in plain English, citing the numbers on screen and nothing else. Shareable link.
-
-## 8. Stack
-
-Next.js (App Router) + TypeScript · Supabase (auth, Postgres, Scorecard cache) · Vercel (deploy) · model implemented in TypeScript as a pure module with tests (Vitest) so no second service is needed · charts with a single library (Recharts) · Claude API for the memo in v2 only. Build with Claude Code against this spec; keep this file in the repo as `SPEC.md` and update it when scope changes.
-
-## 9. Schedule against course milestones
-
-- **Week 4 (planning):** this spec finalized; Scorecard API key; field names confirmed; five hand-worked test cases (spreadsheet) for the model.
-- **Week 5:** repo, model module + tests passing, deployed "hello world" on Vercel.
-- **Week 6 — MVP turn-in:** Start → Add program (manual inputs, no API yet) → Compare with base scenario, chart, payback, NPV, breakeven salary. Deployed.
-- **Weeks 7–9:** Scorecard integration + fallback ladder + confidence labels; three scenarios; accounts and saved workspace; program detail screen.
-- **Week 10 — peer testing:** classmates run their own decision; collect where they got confused.
-- **Weeks 11–12:** fixes from testing; memo (v2) if time; design polish; final deploy.
-- **Week 13:** presentation — lead with one chart and one sentence: "here's what the program has to be true for it to pay off."
-
-## 10. Out of scope (v1)
-
-Non-U.S. programs · tax brackets and state taxes (one flat rate only) · income-driven loan repayment · non-financial value of the degree · undergraduate decisions · admissions odds.
-
-## 11. Open questions
-
-- Resolved: use `earnings["1_yr"].overall_median_earnings` as `S1`. Use the 4-year median to check `g_grad`: for Cal Poly CIP 5213, 73,268 → 131,448 over three years implies ~21%/yr, far above the 4% default. Decide whether to (a) keep a conservative default and show the implied rate on the detail screen, or (b) derive `g_grad` from the data when both points exist. Recommendation: (a) for v1; a 21% implied rate on n≈20 is too noisy to drive the model.
-- New: the national p25/p50/p75 at 4 years give a ready-made spread for the pessimistic/base/optimistic scenarios. Consider replacing the fixed "halve the uplift" rule with p25/p50/p75 scaled to the 1-year figure when they exist, falling back to the fixed rule when they don't.
-- New: map program names to CIP codes. Business analytics may sit under 52.13 (Management Sciences and Quantitative Methods) or the newer 30.71 (Data Analytics). Search both; show the user which CIP title the data came from.
-- Should the horizon default be 10 years or "until age 40"? Decide after the first five user tests.
-- Whether to show pre-tax alongside after-tax. Default: after-tax only, with a toggle if testers ask.
