@@ -48,6 +48,36 @@ const MAX_SERIES_PER_REQUEST = 25;
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * How long to wait on BLS before giving up with a readable error.
+ *
+ * Keep this below the hosting platform's function limit. On Vercel's Hobby tier
+ * that limit is 10s by default, so at 10s the platform can kill the invocation
+ * first and the client gets an empty body — exactly the failure this is meant to
+ * prevent. 8s leaves headroom for the rest of the handler; if you raise this,
+ * raise `maxDuration` on the route too.
+ */
+export const BLS_TIMEOUT_MS = 8_000;
+
+/**
+ * Strips the registration key out of anything we log or return. BLS echoes the
+ * key back inside its own error text ("The key:abc… provided by the User is
+ * invalid"), and both destinations are places it must never reach: the 502 body
+ * goes to the browser, and logs are readable by anyone with project access.
+ */
+function redact(text: string): string {
+  const key = process.env.BLS_API_KEY;
+  if (!key) return text;
+  return text.split(key).join("<redacted key>");
+}
+
+/** First 300 characters of a response body, for logs and error messages. */
+function snippet(body: string): string {
+  const flat = redact(body).replace(/\s+/g, " ").trim();
+  if (flat === "") return "(empty body)";
+  return flat.length > 300 ? `${flat.slice(0, 300)}…` : flat;
+}
+
 export interface SeriesIdParts {
   areaType: AreaType;
   /** 7 digits. For a state this is the 2-digit FIPS plus five zeros. */
@@ -213,26 +243,65 @@ export async function fetchSeries(
     const body: Record<string, unknown> = { seriesid: batch };
     if (apiKey) body.registrationkey = apiKey;
 
+    // A hung request must not outlive the serverless function around it: if the
+    // platform kills the invocation first, the client gets an empty body and a
+    // JSON parse error instead of a readable message.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), BLS_TIMEOUT_MS);
+
     let response: Response;
+    let raw: string;
     try {
       response = await fetch(BLS_ENDPOINT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
         cache: "no-store",
+        signal: controller.signal,
       });
+      // Read as text, not JSON: BLS answers rate limits and block pages with
+      // HTML, and an empty body is possible too. Both must become a BlsError
+      // with the evidence attached, not a raw SyntaxError.
+      raw = await response.text();
     } catch (cause) {
+      if (controller.signal.aborted) {
+        throw new BlsError(
+          `BLS did not answer within ${BLS_TIMEOUT_MS / 1000} seconds.`,
+        );
+      }
       const detail = cause instanceof Error ? cause.message : String(cause);
       throw new BlsError(`Could not reach the BLS API: ${detail}`);
+    } finally {
+      clearTimeout(timer);
     }
 
     if (!response.ok) {
-      throw new BlsError(`BLS API returned HTTP ${response.status}.`);
+      console.error(
+        `[bls] HTTP ${response.status} ${response.statusText}; body starts: ${snippet(raw)}`,
+      );
+      throw new BlsError(
+        `BLS API returned HTTP ${response.status}. Body began: ${snippet(raw)}`,
+      );
     }
 
-    const payload = (await response.json()) as BlsResponse;
+    let payload: BlsResponse;
+    try {
+      payload = JSON.parse(raw) as BlsResponse;
+    } catch {
+      console.error(
+        `[bls] Response was not JSON. HTTP ${response.status} ${response.statusText}; ` +
+          `content-type ${response.headers.get("content-type") ?? "none"}; ` +
+          `body starts: ${snippet(raw)}`,
+      );
+      throw new BlsError(
+        `BLS returned a non-JSON response (HTTP ${response.status}). Body began: ${snippet(raw)}`,
+      );
+    }
+
     if (payload.status !== "REQUEST_SUCCEEDED") {
-      const detail = payload.message?.join(" ") ?? "no detail given";
+      // BLS echoes the registration key back in this message when it is bad.
+      const detail = redact(payload.message?.join(" ") ?? "no detail given");
+      console.error(`[bls] ${payload.status ?? "no status"}: ${detail}`);
       throw new BlsError(`BLS API did not process the request: ${detail}`);
     }
 

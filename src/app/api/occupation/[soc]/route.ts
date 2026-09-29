@@ -17,36 +17,48 @@ import { findOccupation } from "@/lib/occupations";
  * Defaults are the ones verified in SPEC §10 — California and the San Luis
  * Obispo MSA. Not cached by Next; src/lib/bls.ts holds a 24-hour cache of the
  * BLS observations themselves (SPEC §7 moves it to Supabase).
+ *
+ * Every path through this handler returns a JSON body, including unexpected
+ * throws. An escaping exception becomes a platform error page with an empty or
+ * HTML body, which is what produced "Unexpected end of JSON input" on the client
+ * — the page could not parse what came back.
  */
 
-function badRequest(message: string): Response {
-  return Response.json({ error: message }, { status: 400 });
+/** The BLS client uses Node APIs and a 24-hour in-process cache. */
+export const runtime = "nodejs";
+
+/** Reads search params and calls a live API; never prerender or cache it. */
+export const dynamic = "force-dynamic";
+
+function fail(status: number, message: string, extra?: Record<string, unknown>) {
+  return Response.json({ error: message, ...extra }, { status });
 }
 
 export async function GET(
   request: NextRequest,
   ctx: RouteContext<"/api/occupation/[soc]">,
 ) {
-  const { soc } = await ctx.params;
-
-  if (!/^\d{6}$/.test(soc)) {
-    return badRequest(
-      `SOC code must be six digits with no hyphen, got "${soc}".`,
-    );
-  }
-
-  const params = request.nextUrl.searchParams;
-  const stateFips = params.get("state") ?? DEFAULT_STATE_FIPS;
-  const metroCode = params.get("metro") ?? DEFAULT_METRO_CODE;
-
-  if (!/^\d{2}$/.test(stateFips)) {
-    return badRequest(`State FIPS must be two digits, got "${stateFips}".`);
-  }
-  if (!/^\d{7}$/.test(metroCode)) {
-    return badRequest(`Metro code must be seven digits, got "${metroCode}".`);
-  }
-
   try {
+    const { soc } = await ctx.params;
+
+    if (!/^\d{6}$/.test(soc)) {
+      return fail(
+        400,
+        `SOC code must be six digits with no hyphen, got "${soc}".`,
+      );
+    }
+
+    const params = request.nextUrl.searchParams;
+    const stateFips = params.get("state") ?? DEFAULT_STATE_FIPS;
+    const metroCode = params.get("metro") ?? DEFAULT_METRO_CODE;
+
+    if (!/^\d{2}$/.test(stateFips)) {
+      return fail(400, `State FIPS must be two digits, got "${stateFips}".`);
+    }
+    if (!/^\d{7}$/.test(metroCode)) {
+      return fail(400, `Metro code must be seven digits, got "${metroCode}".`);
+    }
+
     const snapshot = await getOccupationSnapshot({
       socCode: soc,
       stateFips,
@@ -65,11 +77,15 @@ export async function GET(
 
     return Response.json(body);
   } catch (cause) {
+    // SPEC §6: blank states are honest. Say what went wrong; never invent
+    // numbers, and never let the exception escape as a non-JSON error page.
     if (cause instanceof BlsError) {
-      // SPEC §6: blank states are honest. Say the source is down; do not invent
-      // numbers or return zeros.
-      return Response.json({ error: cause.message }, { status: 502 });
+      console.error("[occupation] BLS request failed:", cause.message);
+      return fail(502, cause.message, { source: "BLS OEWS" });
     }
-    throw cause;
+
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    console.error("[occupation] Unexpected failure:", detail, cause);
+    return fail(500, `Unexpected server error: ${detail}`);
   }
 }

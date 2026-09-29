@@ -49,14 +49,30 @@ export default function JobPage() {
       signal: controller.signal,
     })
       .then(async (response) => {
-        const body = (await response.json()) as
-          | OccupationApiPayload
-          | { error: string };
+        // Read text first. A crashed or timed-out serverless function answers
+        // with an empty body or an HTML error page, and calling .json() on that
+        // throws "Unexpected end of JSON input" — which tells the user nothing
+        // about what actually went wrong.
+        const raw = await response.text();
+
+        let body: OccupationApiPayload | { error?: string };
+        try {
+          body = JSON.parse(raw) as OccupationApiPayload | { error?: string };
+        } catch {
+          throw new Error(
+            `The server replied with ${response.status} ${response.statusText} ` +
+              `and a body that is not JSON: ${firstLine(raw)}`,
+          );
+        }
+
         if (!response.ok) {
           const message =
-            "error" in body ? body.error : `Request failed (${response.status}).`;
+            "error" in body && body.error
+              ? body.error
+              : `Request failed (${response.status} ${response.statusText}).`;
           throw new Error(message);
         }
+
         setAnswer({
           key: `${soc}|${stateFips}`,
           state: "ready",
@@ -440,6 +456,16 @@ function OccupationPicker({
 /* -------------------------------------------------------------------------- */
 /* Pieces                                                                      */
 /* -------------------------------------------------------------------------- */
+
+/** First non-empty line of a response body, trimmed to something readable. */
+function firstLine(body: string): string {
+  const line = body
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l !== "");
+  if (line === undefined) return "(the body was empty)";
+  return line.length > 200 ? `${line.slice(0, 200)}…` : line;
+}
 
 /** "132051" → "13-2051", which is how SOC codes are written for people. */
 function withHyphen(soc: string): string {
