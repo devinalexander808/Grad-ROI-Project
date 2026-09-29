@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { formatDollars } from "@/lib/format";
-import type { Selection } from "@/lib/selection";
+import { selectedWage, type Selection } from "@/lib/selection";
 
 /** Within this many dollars, the median counts as sitting on the breakeven line. */
 const RIGHT_AT_TOLERANCE = 500;
@@ -18,9 +18,10 @@ export default function NextMoves({
   breakevenS1: number;
   selection: Selection;
 }) {
-  const median = selection.stateMedian;
+  // Metro median when the user picked a metro, else the state median.
+  const { median, place: area, level } = selectedWage(selection);
   const gap = median - breakevenS1;
-  const place = `${midSentence(selection.title)} in ${selection.stateName}`;
+  const place = `${midSentence(selection.title)} in ${area}`;
 
   const comparison =
     Math.abs(gap) <= RIGHT_AT_TOLERANCE
@@ -48,8 +49,8 @@ export default function NextMoves({
         <p>
           {gap >= 0 ? (
             <>
-              Next: check what employers are asking for in{" "}
-              {selection.stateName} postings.{" "}
+              Next: check what employers are asking for in {area}{" "}
+              postings.{" "}
               <Link href="/job" className="text-accent hover:underline">
                 Go to the Job page
               </Link>
@@ -57,7 +58,8 @@ export default function NextMoves({
           ) : (
             <>
               Next: look for a cheaper program or a higher-paying state — try
-              changing the state on the{" "}
+              changing the {level === "metro area" ? "state or metro area" : "state"}{" "}
+              on the{" "}
               <Link href="/job" className="text-accent hover:underline">
                 Job page
               </Link>
@@ -67,8 +69,9 @@ export default function NextMoves({
         </p>
       </div>
       <p className="mt-3 text-xs text-muted">
-        Wage: BLS OEWS{selection.year === null ? "" : ` ${selection.year}`},
-        state median. Breakeven: your inputs above.
+        Wage: BLS OEWS{selection.year === null ? "" : ` ${selection.year}`},{" "}
+        {level === "metro area" ? `metro area median (${area})` : "state median"}.
+        Breakeven: your inputs above.
       </p>
     </section>
   );

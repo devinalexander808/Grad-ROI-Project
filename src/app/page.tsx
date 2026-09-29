@@ -15,7 +15,11 @@ import {
   formatPercent,
   formatSignedDollars,
 } from "@/lib/format";
-import { clearSelection, useSelection } from "@/lib/selection";
+import {
+  clearSelection,
+  selectedWage,
+  useSelection,
+} from "@/lib/selection";
 
 /**
  * Single-page calculator: every input from SPEC.md §4 on the left, the §5
@@ -136,10 +140,11 @@ export default function Home() {
   const [typed, setTyped] = useState<Fields>(DEFAULTS);
   const [salaryTouched, setSalaryTouched] = useState(false);
 
-  // The job + state chosen on the Job page, if any (SPEC §4.1 → §4.2).
+  // The job + place chosen on the Job page, if any (SPEC §4.1 → §4.2). The
+  // wage is the metro median when a metro was picked, else the state median.
   const selection = useSelection();
-  const medianSalary =
-    selection === null ? null : String(Math.round(selection.stateMedian));
+  const wage = selection === null ? null : selectedWage(selection);
+  const medianSalary = wage === null ? null : String(Math.round(wage.median));
 
   // Arriving via the Job page's "Use this in the ROI calculator" button
   // (/?from=job) starts the salary at the BLS median — until the user edits the
@@ -193,14 +198,14 @@ export default function Home() {
         </p>
       </header>
 
-      {selection && (
+      {selection && wage && (
         <div className="mb-6 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-hairline bg-surface px-4 py-2 text-sm text-ink-secondary">
           <span>
             Planning for:{" "}
             <span className="font-medium text-ink">
-              {selection.title} in {selection.stateName}
+              {selection.title} in {wage.place}
             </span>{" "}
-            — BLS median {formatDollars(selection.stateMedian)}
+            — BLS median {formatDollars(wage.median)}
             {selection.year === null ? "" : ` (${selection.year})`}
           </span>
           <span className="flex items-center gap-3 text-xs">
@@ -449,11 +454,11 @@ export default function Home() {
                   )}
                 </p>
                 <p className="mt-3 text-xs text-muted">
-                  {selection && fields.S1 === medianSalary ? (
+                  {selection && wage && fields.S1 === medianSalary ? (
                     <>
-                      The starting salary is the BLS OEWS state median for{" "}
-                      {selection.title} in {selection.stateName}. Every other
-                      number on this page is one you typed.
+                      The starting salary is the BLS OEWS {wage.level} median
+                      for {selection.title} in {wage.place}. Every other number
+                      on this page is one you typed.
                     </>
                   ) : (
                     <>

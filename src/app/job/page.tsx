@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   DEFAULT_STATE_FIPS,
   STATES,
+  metrosInState,
   type AreaFigures,
   type Observation,
   type OccupationApiPayload,
@@ -40,14 +41,19 @@ type Answered = (Load & { state: "ready" | "error" }) & { key: string };
 export default function JobPage() {
   const [soc, setSoc] = useState(DEFAULT_SOC);
   const [stateFips, setStateFips] = useState(DEFAULT_STATE_FIPS);
+  /** null means "Statewide only". */
+  const [metroCode, setMetroCode] = useState<string | null>(null);
   const [answer, setAnswer] = useState<Answered | null>(null);
 
-  const key = `${soc}|${stateFips}`;
+  const key = `${soc}|${stateFips}|${metroCode ?? ""}`;
+  const metros = useMemo(() => metrosInState(stateFips), [stateFips]);
 
   useEffect(() => {
     const controller = new AbortController();
+    const requestKey = `${soc}|${stateFips}|${metroCode ?? ""}`;
+    const metroParam = metroCode === null ? "" : `&metro=${metroCode}`;
 
-    fetch(`/api/occupation/${soc}?state=${stateFips}`, {
+    fetch(`/api/occupation/${soc}?state=${stateFips}${metroParam}`, {
       signal: controller.signal,
     })
       .then(async (response) => {
@@ -76,11 +82,14 @@ export default function JobPage() {
         }
 
         const data = body as OccupationApiPayload;
-        setAnswer({ key: `${soc}|${stateFips}`, state: "ready", data });
+        setAnswer({ key: requestKey, state: "ready", data });
 
         // Hand the choice to the ROI calculator. Without a state median there
         // is nothing to carry, and the calculator never shows a made-up one.
+        // The metro rides along only when one was picked and BLS has a median
+        // for it; otherwise the calculator falls back to the state figure.
         const stateMedian = data.state.medianAnnualWage.value;
+        const metroMedian = data.metro.medianAnnualWage.value;
         if (stateMedian !== null) {
           saveSelection({
             soc: data.soc,
@@ -89,20 +98,27 @@ export default function JobPage() {
             stateName: data.state.name ?? `state ${data.state.fips}`,
             stateMedian,
             year: data.state.medianAnnualWage.year ?? data.asOfYear,
+            ...(metroCode !== null && metroMedian !== null
+              ? {
+                  metroCode: data.metro.code,
+                  metroName: data.metro.name ?? `metro ${data.metro.code}`,
+                  metroMedian,
+                }
+              : {}),
           });
         }
       })
       .catch((cause: unknown) => {
         if (controller.signal.aborted) return;
         setAnswer({
-          key: `${soc}|${stateFips}`,
+          key: requestKey,
           state: "error",
           message: cause instanceof Error ? cause.message : String(cause),
         });
       });
 
     return () => controller.abort();
-  }, [soc, stateFips]);
+  }, [soc, stateFips, metroCode]);
 
   // Loading is derived, not stored: anything other than an answer for the
   // current selection means the fetch is still out.
@@ -128,25 +144,52 @@ export default function JobPage() {
 
       <div className="grid gap-4 sm:grid-cols-2">
         <OccupationPicker soc={soc} onSelect={setSoc} />
-        <label className="block">
-          <span className="text-sm font-medium text-ink">Your state</span>
-          <span className={fieldShell}>
-            <select
-              className={fieldInput}
-              value={stateFips}
-              onChange={(e) => setStateFips(e.target.value)}
-            >
-              {STATES.map((s) => (
-                <option key={s.fips} value={s.fips}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </span>
-          <span className="mt-1 block text-xs text-muted">
-            Metro stays at San Luis Obispo for now; a metro picker comes next.
-          </span>
-        </label>
+        <div className="flex flex-col gap-4">
+          <label className="block">
+            <span className="text-sm font-medium text-ink">Your state</span>
+            <span className={fieldShell}>
+              <select
+                className={fieldInput}
+                value={stateFips}
+                onChange={(e) => {
+                  setStateFips(e.target.value);
+                  setMetroCode(null);
+                }}
+              >
+                {STATES.map((s) => (
+                  <option key={s.fips} value={s.fips}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </span>
+          </label>
+          <label className="block">
+            <span className="text-sm font-medium text-ink">
+              Metro area{" "}
+              <span className="font-normal text-muted">(optional)</span>
+            </span>
+            <span className={fieldShell}>
+              <select
+                className={fieldInput}
+                value={metroCode ?? ""}
+                onChange={(e) => setMetroCode(e.target.value || null)}
+              >
+                <option value="">Statewide only</option>
+                {metros.map((m) => (
+                  <option key={m.code} value={m.code}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+            </span>
+            <span className="mt-1 block text-xs text-muted">
+              {metros.length === 0
+                ? "No metro areas listed for this state yet."
+                : "Adds local figures next to the state and national ones."}
+            </span>
+          </label>
+        </div>
       </div>
 
       {selected && (
@@ -176,7 +219,9 @@ export default function JobPage() {
           </Card>
         )}
 
-        {load.state === "ready" && <Snapshot data={load.data} />}
+        {load.state === "ready" && (
+          <Snapshot data={load.data} showMetro={metroCode !== null} />
+        )}
       </div>
     </div>
   );
@@ -186,15 +231,28 @@ export default function JobPage() {
 /* The card                                                                    */
 /* -------------------------------------------------------------------------- */
 
-function Snapshot({ data }: { data: OccupationApiPayload }) {
+function Snapshot({
+  data,
+  showMetro,
+}: {
+  data: OccupationApiPayload;
+  /** False for "Statewide only": the route still returns a metro, unused. */
+  showMetro: boolean;
+}) {
   const title = data.occupation?.title ?? `SOC ${withHyphen(data.soc)}`;
   const stateLabel = data.state.name ?? `state ${data.state.fips}`;
-  const metroLabel = data.metro.name ?? `metro ${data.metro.code}`;
+  const metroLabel = showMetro
+    ? (data.metro.name ?? `metro ${data.metro.code}`)
+    : null;
   const summary = summarize(data, title, stateLabel, metroLabel);
 
-  const everythingBlank = [data.national, data.state, data.metro].every(
-    (area) => !hasAnyValue(area),
-  );
+  const columns: { label: string; figures: AreaFigures }[] = [
+    { label: "National", figures: data.national },
+    { label: stateLabel, figures: data.state },
+    ...(metroLabel === null ? [] : [{ label: metroLabel, figures: data.metro }]),
+  ];
+
+  const everythingBlank = columns.every(({ figures }) => !hasAnyValue(figures));
 
   return (
     <div className="flex flex-col gap-4">
@@ -208,52 +266,58 @@ function Snapshot({ data }: { data: OccupationApiPayload }) {
             No BLS figures for this occupation
           </h2>
           <p className="mt-2 text-sm text-ink-secondary">
-            The survey returned no employment or wage data for {title} at any of
-            the three geographies. This happens for small occupations, where BLS
+            The survey returned no employment or wage data for {title} in any
+            of the areas shown. This happens for small occupations, where BLS
             suppresses cells to protect employer confidentiality.
           </p>
         </Card>
       ) : (
         <Card>
           <h2 className="text-sm font-semibold text-ink">{title}</h2>
-          <div className="mt-4 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            <Figure
-              label="Jobs nationally"
-              observation={data.national.employment}
-              format={formatCount}
-              source={data.source}
-            />
-            <Figure
-              label="Median pay, national"
-              observation={data.national.medianAnnualWage}
-              format={formatDollars}
-              source={data.source}
-            />
-            <Figure
-              label="Mean pay, national"
-              observation={data.national.meanAnnualWage}
-              format={formatDollars}
-              source={data.source}
-            />
-            <Figure
-              label={`Jobs in ${stateLabel}`}
-              observation={data.state.employment}
-              format={formatCount}
-              source={data.source}
-            />
-            <Figure
-              label={`Median pay, ${stateLabel}`}
-              observation={data.state.medianAnnualWage}
-              format={formatDollars}
-              source={data.source}
-            />
-            <Figure
-              label={`Median pay, ${metroLabel}`}
-              observation={data.metro.medianAnnualWage}
-              format={formatDollars}
-              source={data.source}
-            />
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-right tabular-nums">
+              <thead>
+                <tr className="text-xs text-muted">
+                  <td className="pb-2 pr-4" />
+                  {columns.map((column) => (
+                    <th
+                      key={column.label}
+                      scope="col"
+                      className="pb-2 pl-4 align-bottom font-medium"
+                    >
+                      {column.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {ROWS.map((row) => (
+                  <tr key={row.label} className="border-t border-hairline">
+                    <th
+                      scope="row"
+                      className="py-2 pr-4 text-left text-xs font-medium text-muted"
+                    >
+                      {row.label}
+                    </th>
+                    {columns.map((column) => (
+                      <FigureCell
+                        key={column.label}
+                        observation={row.pick(column.figures)}
+                        format={row.format}
+                        source={data.source}
+                      />
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
+          <p className="mt-3 text-xs text-muted">
+            Source: {data.source}
+            {data.asOfYear === null ? "" : `, ${data.asOfYear}`}. Pay is
+            annual. n/a means BLS published no figure for that area, usually to
+            protect employer confidentiality.
+          </p>
         </Card>
       )}
 
@@ -275,6 +339,16 @@ function Snapshot({ data }: { data: OccupationApiPayload }) {
   );
 }
 
+const ROWS: {
+  label: string;
+  pick: (area: AreaFigures) => Observation;
+  format: (value: number) => string;
+}[] = [
+  { label: "Jobs", pick: (a) => a.employment, format: formatCount },
+  { label: "Median pay", pick: (a) => a.medianAnnualWage, format: formatDollars },
+  { label: "Mean pay", pick: (a) => a.meanAnnualWage, format: formatDollars },
+];
+
 function hasAnyValue(area: AreaFigures): boolean {
   return (
     area.employment.value !== null ||
@@ -283,36 +357,33 @@ function hasAnyValue(area: AreaFigures): boolean {
   );
 }
 
-function Figure({
-  label,
+/** One figure; "n/a" when BLS published nothing, never a zero (SPEC §6). */
+function FigureCell({
   observation,
   format,
   source,
 }: {
-  label: string;
   observation: Observation;
   format: (value: number) => string;
   source: string;
 }) {
-  const missing = observation.value === null;
-  return (
-    <div>
-      <p className="text-xs font-medium text-muted">{label}</p>
-      <p
-        className={
-          missing
-            ? "mt-1 text-sm text-ink-secondary"
-            : "mt-1 text-2xl font-semibold tabular-nums text-ink"
-        }
+  if (observation.value === null) {
+    return (
+      <td
+        className="py-2 pl-4 text-sm text-muted"
+        title={`${source} published no figure for this area`}
       >
-        {missing ? "No data for this area" : format(observation.value as number)}
-      </p>
-      <p className="mt-1 text-xs text-muted">
-        {missing
-          ? `Source: ${source} — series reported nothing`
-          : `Source: ${source}, ${observation.year ?? "year not given"}`}
-      </p>
-    </div>
+        n/a
+      </td>
+    );
+  }
+  return (
+    <td
+      className="py-2 pl-4 text-lg font-semibold text-ink"
+      title={`${source}, ${observation.year ?? "year not given"}`}
+    >
+      {format(observation.value)}
+    </td>
   );
 }
 
@@ -324,14 +395,16 @@ function summarize(
   data: OccupationApiPayload,
   title: string,
   stateLabel: string,
-  metroLabel: string,
+  /** Null for "Statewide only". */
+  metroLabel: string | null,
 ): string {
   const clauses: string[] = [];
   const nationalJobs = data.national.employment.value;
   const nationalMedian = data.national.medianAnnualWage.value;
   const stateJobs = data.state.employment.value;
   const stateMedian = data.state.medianAnnualWage.value;
-  const metroMedian = data.metro.medianAnnualWage.value;
+  const metroMedian =
+    metroLabel === null ? null : data.metro.medianAnnualWage.value;
 
   if (nationalJobs !== null) {
     clauses.push(`about ${formatCount(nationalJobs)} of these jobs nationally`);
@@ -348,7 +421,7 @@ function summarize(
   } else if (stateMedian !== null) {
     clauses.push(`${formatDollars(stateMedian)} in ${stateLabel}`);
   }
-  if (metroMedian !== null) {
+  if (metroMedian !== null && metroLabel !== null) {
     clauses.push(`and ${formatDollars(metroMedian)} around ${metroLabel}`);
   }
 

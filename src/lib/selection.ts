@@ -7,8 +7,9 @@ import { useSyncExternalStore } from "react";
  * the ROI calculator (§4.2) and the Next moves card (§4.4). One localStorage
  * key, so every tab sees the same selection.
  *
- * Only the state median travels: it is the figure the calculator offers as a
- * starting salary, and it keeps its survey year so the source line stays true.
+ * Only medians travel: the state one always, and a metro one when the user
+ * picked a metro and BLS published a figure for it. The calculator offers the
+ * most local of the two as a starting salary (see `selectedWage`).
  */
 
 export interface Selection {
@@ -20,8 +21,40 @@ export interface Selection {
   stateName: string;
   /** BLS OEWS median annual wage for the occupation in that state. */
   stateMedian: number;
-  /** Survey year of that median, or null if BLS did not say. */
+  /** OEWS survey year of the medians, or null if BLS did not say. */
   year: number | null;
+  /** Seven-digit OEWS metro area code. Set together with the two below. */
+  metroCode?: string;
+  metroName?: string;
+  /** BLS OEWS median annual wage for the occupation in that metro. */
+  metroMedian?: number;
+}
+
+export interface SelectedWage {
+  median: number;
+  /** "San Luis Obispo–Paso Robles, CA" or "California". */
+  place: string;
+  /** Which median was used, for source notes. */
+  level: "metro area" | "state";
+}
+
+/** The metro median when there is one, else the state median. */
+export function selectedWage(selection: Selection): SelectedWage {
+  if (
+    selection.metroMedian !== undefined &&
+    selection.metroName !== undefined
+  ) {
+    return {
+      median: selection.metroMedian,
+      place: selection.metroName,
+      level: "metro area",
+    };
+  }
+  return {
+    median: selection.stateMedian,
+    place: selection.stateName,
+    level: "state",
+  };
 }
 
 const STORAGE_KEY = "pathfinder.selection";
@@ -32,7 +65,15 @@ const CHANGE_EVENT = "pathfinder:selection";
 function isSelection(value: unknown): value is Selection {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
+  const metroFields = [v.metroCode, v.metroName, v.metroMedian];
+  const metroOk =
+    metroFields.every((f) => f === undefined) ||
+    (typeof v.metroCode === "string" &&
+      typeof v.metroName === "string" &&
+      typeof v.metroMedian === "number" &&
+      Number.isFinite(v.metroMedian));
   return (
+    metroOk &&
     typeof v.soc === "string" &&
     typeof v.title === "string" &&
     typeof v.stateFips === "string" &&

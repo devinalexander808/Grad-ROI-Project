@@ -485,12 +485,17 @@ export function stateName(fips: string): string | null {
 }
 
 /**
- * Metro names we have a label for. A metro selector is week 7 (SPEC §8); for now
- * the only one the app uses is the San Luis Obispo default.
+ * Metros the Job page offers, each with the state it belongs to so the picker
+ * can filter by state. Only codes verified against the live API (SPEC §10) go
+ * here; so far that is the San Luis Obispo default.
  */
-export const METROS: { code: string; name: string }[] = [
-  { code: "0042200", name: "San Luis Obispo–Paso Robles, CA" },
+export const METROS: { code: string; name: string; stateFips: string }[] = [
+  { code: "0042200", name: "San Luis Obispo–Paso Robles, CA", stateFips: "06" },
 ];
+
+export function metrosInState(fips: string): { code: string; name: string }[] {
+  return METROS.filter((m) => m.stateFips === fips);
+}
 
 export function metroName(code: string): string | null {
   return METROS.find((m) => m.code === code)?.name ?? null;
