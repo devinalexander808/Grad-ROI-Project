@@ -90,10 +90,26 @@ export default function CumulativeChart({ years, paybackYear }: Props) {
               stroke="var(--surface)"
               strokeWidth={2}
               label={{
-                value: `Pays off in year ${crossover.year}`,
-                position: "top",
-                fill: "var(--ink-secondary)",
-                fontSize: 12,
+                // A label centred over the dot runs off the plot when payback
+                // lands near either end of the horizon. Anchor it on the side
+                // with room: text runs left of a dot in the right half, and
+                // right of one in the left half.
+                content: ({ viewBox }) => {
+                  if (!viewBox || !("x" in viewBox)) return null;
+                  const cx = viewBox.x + viewBox.width / 2;
+                  const onRight = crossover.year > (data.length + 1) / 2;
+                  return (
+                    <text
+                      x={onRight ? cx - 4 : cx + 4}
+                      y={viewBox.y - 6}
+                      textAnchor={onRight ? "end" : "start"}
+                      fill="var(--ink-secondary)"
+                      fontSize={12}
+                    >
+                      Pays off in year {crossover.year}
+                    </text>
+                  );
+                },
               }}
             />
           )}

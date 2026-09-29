@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   DEFAULT_STATE_FIPS,
@@ -14,6 +15,7 @@ import {
   type Occupation,
 } from "@/lib/occupations";
 import { formatCount, formatDollars } from "@/lib/format";
+import { saveSelection } from "@/lib/selection";
 
 /**
  * SPEC.md §4.1, "The job right now" — the employment and pay half of it, live
@@ -73,11 +75,22 @@ export default function JobPage() {
           throw new Error(message);
         }
 
-        setAnswer({
-          key: `${soc}|${stateFips}`,
-          state: "ready",
-          data: body as OccupationApiPayload,
-        });
+        const data = body as OccupationApiPayload;
+        setAnswer({ key: `${soc}|${stateFips}`, state: "ready", data });
+
+        // Hand the choice to the ROI calculator. Without a state median there
+        // is nothing to carry, and the calculator never shows a made-up one.
+        const stateMedian = data.state.medianAnnualWage.value;
+        if (stateMedian !== null) {
+          saveSelection({
+            soc: data.soc,
+            title: data.occupation?.title ?? `SOC ${withHyphen(data.soc)}`,
+            stateFips: data.state.fips,
+            stateName: data.state.name ?? `state ${data.state.fips}`,
+            stateMedian,
+            year: data.state.medianAnnualWage.year ?? data.asOfYear,
+          });
+        }
       })
       .catch((cause: unknown) => {
         if (controller.signal.aborted) return;
@@ -242,6 +255,21 @@ function Snapshot({ data }: { data: OccupationApiPayload }) {
             />
           </div>
         </Card>
+      )}
+
+      {data.state.medianAnnualWage.value !== null ? (
+        <div>
+          <Link
+            href="/?from=job"
+            className="inline-flex items-center rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90"
+          >
+            Use this in the ROI calculator
+          </Link>
+        </div>
+      ) : (
+        <p className="text-xs text-muted">
+          No state median available, so this can’t be sent to the calculator.
+        </p>
       )}
     </div>
   );

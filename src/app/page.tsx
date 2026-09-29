@@ -1,13 +1,21 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import Link from "next/link";
+import {
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import CumulativeChart from "./cumulative-chart";
+import NextMoves from "./next-moves";
 import { runModel, type ModelInputs } from "@/lib/model";
 import {
   formatDollars,
   formatPercent,
   formatSignedDollars,
 } from "@/lib/format";
+import { clearSelection, useSelection } from "@/lib/selection";
 
 /**
  * Single-page calculator: every input from SPEC.md §4 on the left, the §5
@@ -115,11 +123,51 @@ function problems(inputs: ModelInputs): string[] {
   return found;
 }
 
-export default function Home() {
-  const [fields, setFields] = useState<Fields>(DEFAULTS);
+/** The URL never changes under this page, so there is nothing to subscribe to. */
+function noSubscription(): () => void {
+  return () => {};
+}
 
-  const set = (key: keyof Fields) => (value: string) =>
-    setFields((prev) => ({ ...prev, [key]: value }));
+function cameFromJobPage(): boolean {
+  return new URLSearchParams(window.location.search).get("from") === "job";
+}
+
+export default function Home() {
+  const [typed, setTyped] = useState<Fields>(DEFAULTS);
+  const [salaryTouched, setSalaryTouched] = useState(false);
+
+  // The job + state chosen on the Job page, if any (SPEC §4.1 → §4.2).
+  const selection = useSelection();
+  const medianSalary =
+    selection === null ? null : String(Math.round(selection.stateMedian));
+
+  // Arriving via the Job page's "Use this in the ROI calculator" button
+  // (/?from=job) starts the salary at the BLS median — until the user edits the
+  // salary, after which what they typed always wins.
+  const fromJob = useSyncExternalStore(
+    noSubscription,
+    cameFromJobPage,
+    () => false,
+  );
+  const fields = useMemo(
+    () =>
+      fromJob && !salaryTouched && medianSalary !== null
+        ? { ...typed, S1: medianSalary }
+        : typed,
+    [typed, fromJob, salaryTouched, medianSalary],
+  );
+
+  const set = (key: keyof Fields) => (value: string) => {
+    if (key === "S1") setSalaryTouched(true);
+    setTyped((prev) => ({ ...prev, [key]: value }));
+  };
+
+  // Clearing the selection must not quietly swap the salary back to the
+  // default, so pin whatever is showing first.
+  const clear = () => {
+    set("S1")(fields.S1);
+    clearSelection();
+  };
 
   const inputs = useMemo(() => toModelInputs(fields), [fields]);
   const issues = useMemo(() => problems(inputs), [inputs]);
@@ -144,6 +192,31 @@ export default function Home() {
           change, and every figure is after tax.
         </p>
       </header>
+
+      {selection && (
+        <div className="mb-6 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-hairline bg-surface px-4 py-2 text-sm text-ink-secondary">
+          <span>
+            Planning for:{" "}
+            <span className="font-medium text-ink">
+              {selection.title} in {selection.stateName}
+            </span>{" "}
+            — BLS median {formatDollars(selection.stateMedian)}
+            {selection.year === null ? "" : ` (${selection.year})`}
+          </span>
+          <span className="flex items-center gap-3 text-xs">
+            <Link href="/job" className="text-accent hover:underline">
+              change
+            </Link>
+            <button
+              type="button"
+              className="text-muted hover:text-ink hover:underline"
+              onClick={clear}
+            >
+              clear
+            </button>
+          </span>
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-12">
         {/* ---------------------------------------------------------------- */}
@@ -283,6 +356,20 @@ export default function Home() {
               value={fields.S1}
               onChange={set("S1")}
               step={1000}
+              action={
+                medianSalary !== null && (
+                  <button
+                    type="button"
+                    disabled={fields.S1 === medianSalary}
+                    className="rounded-full border border-hairline px-2.5 py-0.5 text-xs text-accent hover:border-accent disabled:cursor-default disabled:border-hairline disabled:text-muted"
+                    onClick={() => set("S1")(medianSalary)}
+                  >
+                    {fields.S1 === medianSalary
+                      ? "Using BLS median"
+                      : `Use BLS median (${formatDollars(Number(medianSalary))})`}
+                  </button>
+                )
+              }
             />
             <Field
               label="Raise rate after the program"
@@ -362,8 +449,18 @@ export default function Home() {
                   )}
                 </p>
                 <p className="mt-3 text-xs text-muted">
-                  Scorecard medians land here in a later version. For now every
-                  number on this page is one you typed.
+                  {selection && fields.S1 === medianSalary ? (
+                    <>
+                      The starting salary is the BLS OEWS state median for{" "}
+                      {selection.title} in {selection.stateName}. Every other
+                      number on this page is one you typed.
+                    </>
+                  ) : (
+                    <>
+                      Scorecard medians land here in a later version. For now
+                      every number on this page is one you typed.
+                    </>
+                  )}
                 </p>
               </Card>
 
@@ -404,6 +501,10 @@ export default function Home() {
                   }
                 />
               </div>
+
+              {selection && breakeven !== null && (
+                <NextMoves breakevenS1={breakeven} selection={selection} />
+              )}
 
               <Card>
                 <h2 className="text-sm font-semibold text-ink">
@@ -564,6 +665,7 @@ function Field({
   min,
   max,
   step,
+  action,
 }: {
   label: string;
   hint: string;
@@ -576,8 +678,10 @@ function Field({
   min?: number;
   max?: number;
   step?: number;
+  /** A control shown under the field, outside the label so it keeps its own name. */
+  action?: ReactNode;
 }) {
-  return (
+  const field = (
     <label className="block">
       <span className="text-sm font-medium text-ink">{label}</span>
       <span className={fieldShell}>
@@ -597,6 +701,13 @@ function Field({
       </span>
       <span className="mt-1 block text-xs text-muted">{hint}</span>
     </label>
+  );
+  if (!action) return field;
+  return (
+    <div>
+      {field}
+      <div className="mt-1.5">{action}</div>
+    </div>
   );
 }
 
