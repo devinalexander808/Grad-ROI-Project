@@ -12,10 +12,10 @@ import { findOccupation } from "@/lib/occupations";
  * SPEC.md §4.1 for one occupation: employment and pay nationally, for the user's
  * state, and for their metro.
  *
- * GET /api/occupation/132051?state=06&metro=0042200
+ * GET /api/occupation/132051?state=06&metro=0042020
  *
  * Defaults are the ones verified in SPEC §10 — California and the San Luis
- * Obispo MSA. Not cached by Next; src/lib/bls.ts holds a 24-hour cache of the
+ * Obispo–Paso Robles MSA. Not cached by Next; src/lib/bls.ts holds a 24-hour cache of the
  * BLS observations themselves (SPEC §7 moves it to Supabase).
  *
  * Every path through this handler returns a JSON body, including unexpected

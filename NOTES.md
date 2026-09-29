@@ -27,8 +27,9 @@ One entry per commit, oldest first. Built with Claude Code; deployed on Vercel.
 ## 2026-09-27 — `aa1a212` Add BLS job snapshot page, occupation table, and nav
 
 - **Built:** SPEC §4.1 "The job right now". `/api/occupation/[soc]` calls
-  BLS OEWS for employment and median/mean wage (national, state, San Luis Obispo
-  metro) with a 24-hour in-process cache. `/job` page with a searchable
+  BLS OEWS for employment and median/mean wage (national, state, and a metro
+  labelled San Luis Obispo — actually Santa Barbara; see `0042200` fix below)
+  with a 24-hour in-process cache. `/job` page with a searchable
   20-occupation seed table (`src/lib/occupations.ts`), state picker, and a
   six-figure card where every number carries its source and year. Also: the
   calculator UI on `/`, the cumulative-cash chart, shared formatters, top nav.
@@ -79,6 +80,39 @@ One entry per commit, oldest first. Built with Claude Code; deployed on Vercel.
   lint rule rejects. **Fix:** compute the salary during render instead. It uses
   the median until the user edits the field, so a typed salary is never
   overwritten.
+
+## 2026-09-28 — `5852892` Add metro area picker; carry metro median into calculator
+
+- **Built:** Optional "Metro area" dropdown on `/job`, filtered to the chosen
+  state and reset when the state changes. The card became a table (Jobs /
+  Median / Mean × National / State / Metro), with "n/a" for figures BLS doesn't
+  publish. The selection carries an optional metro median, and the calculator
+  banner, BLS chip and Next moves use it when present, else the state median.
+- **Prompt intent:** Let the user narrow pay to their metro and have the
+  calculator use the most local median.
+- **Bugs:** None found at the time. The metro table had one entry, and its code
+  was wrong (next entry).
+
+## 2026-09-28 — Add verified California metros; fix SLO metro code (42020, was 42200)
+
+- **Built:** `scripts/verify-metros.ts` (run with `npx tsx`, not part of the
+  app) asks BLS for the 2025 financial analyst median for each candidate
+  California metro via `fetchSeries`. All 16 returned data, and `METROS` now
+  lists them, sorted by name. The default metro changed to `0042020`.
+- **Prompt intent:** Add California metros, but only codes proven against the
+  live API.
+- **Bug — `0042200` mislabelled as San Luis Obispo:** From the first BLS commit
+  (`aa1a212`, Sept 27) the app, SPEC §10 and the code comments called
+  `0042200` San Luis Obispo. It is Santa Maria–Santa Barbara ($97,720); SLO is
+  `0042020` ($102,970). It went unnoticed because BLS's wage data API returns
+  numbers but no area names. Every code returned a plausible median, so the
+  label could not be wrong in any visible way. The verify script checked both
+  codes. Both had data, so the numbers couldn't settle it, and the BLS CBSA
+  code list confirmed which was which. **Fix:** relabel `0042200`, add
+  `0042020`, change the default, and correct SPEC §10, `bls.ts` and the route
+  comment.
+- **Lesson:** "The API returned data" is not verification of what the data
+  describes. Check labels against the source's own code list.
 
 ---
 

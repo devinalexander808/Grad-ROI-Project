@@ -9,7 +9,9 @@
  *
  * Verified values for financial analysts (132051), 2025: national employment
  * 361,980 / median $102,740 / mean $116,800; California employment 45,380,
- * median $109,110; San Luis Obispo MSA median $97,720.
+ * median $109,110; San Luis Obispo–Paso Robles MSA (0042020) median $102,970.
+ * The original note gave SLO as 0042200, which is Santa Maria–Santa Barbara
+ * ($97,720); scripts/verify-metros.ts caught it.
  *
  * Rate limits (SPEC §10): unregistered use is 25 queries/day and 25 series per
  * query. A free BLS_API_KEY raises that to 500/day and 50 per query. We stay
@@ -39,9 +41,9 @@ export const ALL_INDUSTRIES = "000000";
 
 export const NATIONAL_AREA_CODE = "0000000";
 
-/** SPEC §10 defaults: California and the San Luis Obispo MSA. */
+/** SPEC §10 defaults: California and the San Luis Obispo–Paso Robles MSA. */
 export const DEFAULT_STATE_FIPS = "06";
-export const DEFAULT_METRO_CODE = "0042200";
+export const DEFAULT_METRO_CODE = "0042020";
 
 /** BLS caps a query at 25 series without a registration key (SPEC §10). */
 const MAX_SERIES_PER_REQUEST = 25;
@@ -486,11 +488,28 @@ export function stateName(fips: string): string | null {
 
 /**
  * Metros the Job page offers, each with the state it belongs to so the picker
- * can filter by state. Only codes verified against the live API (SPEC §10) go
- * here; so far that is the San Luis Obispo default.
+ * can filter by state. Only codes verified against the live API go here: each
+ * returned a 2025 median for SOC 13-2051 (scripts/verify-metros.ts, Sept 28,
+ * 2026). BLS's data API does not return area names, so names are the Census
+ * CBSA titles, checked against the BLS CBSA code list. Sorted by name.
  */
 export const METROS: { code: string; name: string; stateFips: string }[] = [
-  { code: "0042200", name: "San Luis Obispo–Paso Robles, CA", stateFips: "06" },
+  { code: "0012540", name: "Bakersfield–Delano, CA", stateFips: "06" },
+  { code: "0023420", name: "Fresno, CA", stateFips: "06" },
+  { code: "0031080", name: "Los Angeles–Long Beach–Anaheim, CA", stateFips: "06" },
+  { code: "0033700", name: "Modesto, CA", stateFips: "06" },
+  { code: "0037100", name: "Oxnard–Thousand Oaks–Ventura, CA", stateFips: "06" },
+  { code: "0040140", name: "Riverside–San Bernardino–Ontario, CA", stateFips: "06" },
+  { code: "0040900", name: "Sacramento–Roseville–Folsom, CA", stateFips: "06" },
+  { code: "0041500", name: "Salinas, CA", stateFips: "06" },
+  { code: "0041740", name: "San Diego–Chula Vista–Carlsbad, CA", stateFips: "06" },
+  { code: "0041860", name: "San Francisco–Oakland–Fremont, CA", stateFips: "06" },
+  { code: "0041940", name: "San Jose–Sunnyvale–Santa Clara, CA", stateFips: "06" },
+  { code: "0042020", name: "San Luis Obispo–Paso Robles, CA", stateFips: "06" },
+  { code: "0042100", name: "Santa Cruz–Watsonville, CA", stateFips: "06" },
+  { code: "0042200", name: "Santa Maria–Santa Barbara, CA", stateFips: "06" },
+  { code: "0042220", name: "Santa Rosa–Petaluma, CA", stateFips: "06" },
+  { code: "0044700", name: "Stockton–Lodi, CA", stateFips: "06" },
 ];
 
 export function metrosInState(fips: string): { code: string; name: string }[] {
