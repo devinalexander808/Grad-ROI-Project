@@ -114,6 +114,23 @@ One entry per commit, oldest first. Built with Claude Code; deployed on Vercel.
 - **Lesson:** "The API returned data" is not verification of what the data
   describes. Check labels against the source's own code list.
 
+## 2026-10-03 — Add CLAUDE.md, PLAN.md, and /build and /ship commands
+
+- **Built:** `CLAUDE.md` now holds the standing rules (below the existing
+  `@AGENTS.md` import): model frozen unless the workbook and tests change, no
+  silent new dependencies, `npm test` + `npm run build` green on every task,
+  diff summary before any commit, no commits unless asked, one NOTES.md entry
+  per commit, secrets only in `.env.local` and Vercel, plain-language UI with
+  source and year on every figure. `PLAN.md` lays out Builds 1–7 with goals and
+  acceptance checks (Build 1 is a placeholder). `.claude/commands/build.md`
+  (`/build N`) implements a PLAN section and stops with a diff summary;
+  `.claude/commands/ship.md` (`/ship <message>`) writes the NOTES entry, runs
+  tests and build, then commits and pushes.
+- **Prompt intent:** Turn the way I already work with Claude Code into
+  repeatable commands, so each remaining build is one bounded `/build` and one
+  `/ship`.
+- **Bugs:** None.
+
 ---
 
 ## How I work with Claude Code
