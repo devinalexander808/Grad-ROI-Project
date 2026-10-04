@@ -131,6 +131,18 @@ One entry per commit, oldest first. Built with Claude Code; deployed on Vercel.
   `/ship`.
 - **Bugs:** None.
 
+## 2026-10-03 — Add Build 1 spec to PLAN.md
+
+- **Built:** Replaced the Build 1 placeholder in `PLAN.md` with the full spec:
+  a three-step start screen on `/` (where you are now, the job you want, the
+  program you're considering), the calculator moved to `/calculator` with the
+  start-screen inputs on top and everything else under "Adjust assumptions",
+  a shared `occupation-picker.tsx`, new optional `profile` and `program`
+  objects in `selection.ts`, and a "Model limits" note.
+- **Prompt intent:** Pin down Build 1 so `/build 1` has exact steps and
+  acceptance checks; no app code changes yet.
+- **Bugs:** None.
+
 ---
 
 ## How I work with Claude Code

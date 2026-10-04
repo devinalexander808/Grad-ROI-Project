@@ -6,9 +6,51 @@ Seven builds, in order. Each has a goal and acceptance checks. Run one with
 
 ---
 
-## Build 1
+## Build 1 — Guided start screen
 
-Full text to follow.
+**Goal:** A user should never face 19 inputs. The home page (`/`) becomes a
+three-step start screen; the full calculator moves to `/calculator` and becomes
+the "adjust assumptions" view.
+
+**Steps:**
+
+1. **Move the calculator.** Move the current calculator page to
+   `src/app/calculator/page.tsx` (route `/calculator`). Update `nav.tsx` so the
+   links are Start (`/`), Job (`/job`), Calculator (`/calculator`). Keep every
+   existing calculator behaviour, including the `?from=job` pre-fill and the
+   Next moves card.
+2. **New start screen.** New `src/app/page.tsx` with three cards on one page:
+   - **Step 1 "Where are you now":** current salary (pre-tax, required), years
+     of work experience (0–40), highest degree (dropdown: high school,
+     associate, bachelor's, master's, other). Save as a new optional `profile`
+     object in `selection.ts`.
+   - **Step 2 "What job do you want":** the same searchable occupation picker
+     and state/metro pickers the Job page uses, extracted into a shared
+     component `src/app/occupation-picker.tsx` used by both pages. Show the BLS
+     median inline once chosen, and save the selection exactly as the Job page
+     does.
+   - **Step 3 "What program are you considering":** program name (text), total
+     tuition and fees, program length in years, with a muted note "Soon:
+     search a real program and we'll fill these in from College Scorecard".
+     Save as an optional `program` object in `selection.ts`.
+
+   Under the cards, one button **"See if it pays off"** → `/calculator`,
+   pre-filling S0 from step 1, S1 from the BLS median (metro if chosen, else
+   state), and T and L from step 3; everything else keeps `DEFAULTS`.
+3. **Calculator layout.** On `/calculator`, the five inputs that came from the
+   start screen stay visible at the top with a "from your start screen" label;
+   all other inputs collapse under an "Adjust assumptions" toggle (closed by
+   default), each with a one-sentence plain-language hint. Add a "Model limits"
+   note under the results: one flat tax rate (no state tax), no adjustment for
+   the chance you don't land the job, no value placed on non-money reasons for
+   the degree.
+
+**Acceptance checks:**
+- `src/lib/model.ts` untouched.
+- No new dependencies.
+- `npm test`, `npm run build`, and `npm run lint` pass.
+- The flow Start → "See if it pays off" → `/calculator` shows the pre-filled
+  values.
 
 ---
 
