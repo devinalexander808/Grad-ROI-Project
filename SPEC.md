@@ -186,12 +186,13 @@ All sources are U.S. federal or free-tier commercial; none require scraping.
 - Suppression: suppressed values come back as `null` (not the string "PrivacySuppressed" used in the CSV). The median can be null while the average is present (Cal Poly CIP 5213 master's: debt count 18, median null, average 30,820). Handle each field independently.
 - Coverage observed at Cal Poly: 16 of 48 graduate programs have a 1-year earnings median; the rest are null. Expect similar or worse elsewhere, so the fallback ladder is core, not edge.
 - Reference values (Cal Poly SLO, master's level; data pooled over 2014-15 to 2019-20 completers, federal-aid recipients only):
-  - CIP 5213 Management Sciences and Quantitative Methods (the CIP family business analytics programs usually report under; confirm the MSBA maps here): 1-yr median 73,268 (n=18); 4-yr median 131,448 (n=24); national 4-yr median 124,807, p25 93,429, p75 167,728; debt avg 30,820 (n=18).
+  - CIP 5213 Management Sciences and Quantitative Methods (the CIP family business analytics programs usually report under; confirm the MSBA maps here), live as of Oct 3, 2026: 1-yr median 96,886 (n=26); 4-yr median 131,448 (n=24); national 4-yr median 124,807, p25 93,429, p75 167,728; debt average 30,820 (n=18), median suppressed.
   - CIP 5202 Business Administration (MBA): 1-yr median 69,350 (n=18); 4-yr median 108,148 (n=32); debt median 20,500, monthly payment 233 (n=19).
+- Scorecard publishes no graduate tuition (`latest.cost.tuition` is the school's undergraduate price) and no cohort year for program-level figures, so the app labels them "latest release, retrieved <month year>".
 - Rate limit: 1,000 requests per hour per key; cache everything.
 - Fallback ladder for `S1` (try in order, and label which level was used):
   1. This program at this school — median earnings, most recent cohort
-  2. Same CIP field at this school, any credential level
+  2. Same CIP field at this school, any graduate credential level (≥ 5); never a bachelor's figure
   3. Same program (CIP + credential) at peer schools (same state and control type), median of medians
   4. National BLS median wage for the occupation the degree most commonly leads to
   5. No data — ask the user for a number and label it "your estimate"

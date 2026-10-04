@@ -172,6 +172,43 @@ One entry per commit, oldest first. Built with Claude Code; deployed on Vercel.
   median ($102,970); the Job page's button still pre-fills only the starting
   salary.
 
+## 2026-10-03 — Add College Scorecard program search with confidence labels
+
+- **Built:** PLAN Build 3 (Build 2 not yet done; nothing here depends on it).
+  `src/lib/scorecard.ts` is a server-side College Scorecard client modelled on
+  `bls.ts` (8s timeout, key redacted from logs and errors, 24-hour in-process
+  cache) with `/api/schools?q=` for school search and `/api/schools/[id]` for
+  one school's graduate programs. Each program gets first-year pay and typical
+  debt with an A3 confidence label (High / Medium) or an honest blank, and
+  tuition is always blank. A shared `program-search.tsx` picker sits in Start
+  screen step 3 and on the calculator; either pick is saved to the `program`
+  store. On the calculator, Scorecard first-year pay fills Starting salary
+  (ahead of the BLS median) and typical debt fills Amount borrowed, never over
+  a typed number; pre-filled fields show their source and confidence, and the
+  headline card has the three-number sentence (program grads' start pay / BLS
+  typical pay / breakeven). Nine new tests for the ladder logic.
+  `model.ts` untouched, no new dependencies.
+- **Prompt intent:** Replace hand-typed program numbers with the Department
+  of Education's, and be plain about what it doesn't publish.
+- **Found in the data, not bugs in the code:** Scorecard has no graduate
+  tuition (only the school's undergraduate price) and no cohort year for
+  program-level figures, so figures are labelled "latest release, retrieved
+  Oct 2026". The SPEC A3 reference values had gone stale: Cal Poly CIP 5213
+  master's is now $96,886 (n=26), not $73,268 (n=18). SPEC updated.
+- **Bug — bachelor's pay standing in for graduate programs:** The first draft
+  followed A3 ladder step 2 literally ("same CIP field, any credential
+  level"), so 20 of Cal Poly's 48 graduate programs showed a bachelor's
+  median labelled Medium (e.g. Agricultural Business master's at $52,778),
+  understating graduate pay. Caught in diff review. **Fix:** the fallback only
+  uses another graduate-level (≥ 5) program in the same field; otherwise
+  "No first-year pay data for this program". A test asserts a bachelor's-only
+  field comes back as no data, and SPEC A3 step 2 now says so.
+- **Verified:** In the browser, Cal Poly → CIP 5213 master's showed $96,886
+  (High, 26 graduates), debt $30,820 (Medium, average; median suppressed),
+  tuition "Not reported", and the calculator pre-filled both with the
+  three-number sentence; typing over Starting salary switched its label to
+  "Your input". Not re-checked in the browser after the graduate-only fix.
+
 ---
 
 ## How I work with Claude Code

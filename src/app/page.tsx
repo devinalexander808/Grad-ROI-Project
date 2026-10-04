@@ -13,6 +13,7 @@ import {
   type Degree,
   type Profile,
   type Program,
+  type ScorecardChoice,
 } from "@/lib/selection";
 import OccupationPicker, {
   DEFAULT_CHOICE,
@@ -20,6 +21,7 @@ import OccupationPicker, {
   type JobChoice,
   type Load,
 } from "./occupation-picker";
+import ProgramSearch from "./program-search";
 
 /**
  * The Start screen: three short steps instead of the calculator's 19 inputs.
@@ -78,6 +80,9 @@ function StartForm() {
   const [program, setProgram] = useState<ProgramFields>(() =>
     toProgramFields(readProgram()),
   );
+  const [scorecard, setScorecard] = useState<ScorecardChoice | undefined>(
+    () => readProgram()?.scorecard,
+  );
   const [choice, setChoice] = useState<JobChoice>(() => {
     const saved = readSelection();
     return saved === null
@@ -99,7 +104,18 @@ function StartForm() {
   const updateProgram = (key: keyof ProgramFields) => (value: string) => {
     const next = { ...program, [key]: value };
     setProgram(next);
-    saveProgram(fromProgramFields(next));
+    saveProgram(fromProgramFields(next, scorecard));
+  };
+  // Picking a Scorecard program names it if the user hasn't. Tuition and
+  // length stay as typed: Scorecard reports neither for graduate programs.
+  const chooseScorecard = (next: ScorecardChoice | undefined) => {
+    const fields =
+      next !== undefined && program.name.trim() === ""
+        ? { ...program, name: `${next.title}, ${next.schoolName}` }
+        : program;
+    setProgram(fields);
+    setScorecard(next);
+    saveProgram(fromProgramFields(fields, next));
   };
 
   const salary = positive(profile.salary);
@@ -165,6 +181,12 @@ function StartForm() {
       </Step>
 
       <Step number={3} title="What program are you considering">
+        <ProgramSearch value={scorecard} onChange={chooseScorecard} />
+        <p className="mt-4 mb-3 text-xs text-muted">
+          {scorecard === undefined
+            ? "Can’t find it? Type the details in yourself."
+            : "Scorecard doesn’t report graduate tuition or program length, so add them here."}
+        </p>
         <div className="grid gap-4 sm:grid-cols-3">
           <Field
             label="Program name"
@@ -191,10 +213,6 @@ function StartForm() {
             step={0.5}
           />
         </div>
-        <p className="mt-3 text-xs text-muted">
-          Soon: search a real program and we’ll fill these in from College
-          Scorecard.
-        </p>
       </Step>
 
       <div className="flex flex-wrap items-center gap-3">
@@ -314,12 +332,16 @@ function toProfileFields(p: Profile | null): ProfileFields {
   };
 }
 
-function fromProgramFields(f: ProgramFields): Program {
+function fromProgramFields(
+  f: ProgramFields,
+  scorecard: ScorecardChoice | undefined,
+): Program {
   const tuition = amount(f.tuition);
   return {
     name: f.name.trim(),
     tuition: tuition !== null && tuition >= 0 ? tuition : null,
     years: positive(f.years),
+    ...(scorecard === undefined ? {} : { scorecard }),
   };
 }
 

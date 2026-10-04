@@ -1,6 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import type { Confidence, Figure } from "./scorecard";
 
 /**
  * What the user has told us so far, carried between pages in localStorage so
@@ -9,7 +10,8 @@ import { useSyncExternalStore } from "react";
  * - `Selection`: the job + location choice, from the Job page or the Start
  *   screen (SPEC §4.1) into the ROI calculator (§4.2) and Next moves (§4.4).
  * - `Profile`: where the user is now (Start screen step 1). Optional.
- * - `Program`: the program they're considering (Start screen step 3). Optional.
+ * - `Program`: the program they're considering (Start screen step 3), and the
+ *   College Scorecard program it was matched to, if any. Optional.
  *
  * Only medians travel in a selection: the state one always, and a metro one
  * when the user picked a metro and BLS published a figure for it. The
@@ -54,12 +56,31 @@ export interface Profile {
   degree: Degree | null;
 }
 
+/** A program picked from College Scorecard, with its figures as fetched. */
+export interface ScorecardChoice {
+  schoolId: number;
+  schoolName: string;
+  /** 4-digit CIP code. */
+  code: string;
+  title: string;
+  credentialTitle: string;
+  firstYearEarnings: Figure;
+  typicalDebt: Figure;
+  tuition: Figure;
+  /** "College Scorecard". */
+  source: string;
+  /** "latest release, retrieved Oct 2026". */
+  asOf: string;
+}
+
 /** Start screen step 3. Null means "not answered yet". */
 export interface Program {
   name: string;
   /** The whole program, not per year. */
   tuition: number | null;
   years: number | null;
+  /** Set when the program was picked from College Scorecard. */
+  scorecard?: ScorecardChoice;
 }
 
 export interface SelectedWage {
@@ -135,12 +156,41 @@ function isProfile(value: unknown): value is Profile {
   );
 }
 
+const CONFIDENCES: readonly Confidence[] = ["High", "Medium", "Low"];
+
+function isFigure(value: unknown): value is Figure {
+  if (!isRecord(value)) return false;
+  return (
+    isNumberOrNull(value.value) &&
+    (value.confidence === null ||
+      CONFIDENCES.includes(value.confidence as Confidence)) &&
+    typeof value.note === "string"
+  );
+}
+
+function isScorecardChoice(value: unknown): value is ScorecardChoice {
+  if (!isRecord(value)) return false;
+  return (
+    isFiniteNumber(value.schoolId) &&
+    typeof value.schoolName === "string" &&
+    typeof value.code === "string" &&
+    typeof value.title === "string" &&
+    typeof value.credentialTitle === "string" &&
+    isFigure(value.firstYearEarnings) &&
+    isFigure(value.typicalDebt) &&
+    isFigure(value.tuition) &&
+    typeof value.source === "string" &&
+    typeof value.asOf === "string"
+  );
+}
+
 function isProgram(value: unknown): value is Program {
   if (!isRecord(value)) return false;
   return (
     typeof value.name === "string" &&
     isNumberOrNull(value.tuition) &&
-    isNumberOrNull(value.years)
+    isNumberOrNull(value.years) &&
+    (value.scorecard === undefined || isScorecardChoice(value.scorecard))
   );
 }
 

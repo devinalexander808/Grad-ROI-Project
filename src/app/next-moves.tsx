@@ -78,7 +78,7 @@ export default function NextMoves({
 }
 
 /** "Financial analyst" → "financial analyst"; leaves "SOC 13-2051" alone. */
-function midSentence(title: string): string {
+export function midSentence(title: string): string {
   if (/^[A-Z][a-z]/.test(title)) return title[0].toLowerCase() + title.slice(1);
   return title;
 }

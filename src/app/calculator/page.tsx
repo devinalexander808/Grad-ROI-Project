@@ -8,7 +8,9 @@ import {
   type ReactNode,
 } from "react";
 import CumulativeChart from "../cumulative-chart";
-import NextMoves from "../next-moves";
+import NextMoves, { midSentence } from "../next-moves";
+import ProgramSearch, { ConfidenceBadge } from "../program-search";
+import type { Confidence } from "@/lib/scorecard";
 import { runModel, type ModelInputs } from "@/lib/model";
 import {
   formatDollars,
@@ -17,10 +19,13 @@ import {
 } from "@/lib/format";
 import {
   clearSelection,
+  saveProgram,
   selectedWage,
   useProfile,
   useProgram,
   useSelection,
+  type ScorecardChoice,
+  type Selection,
 } from "@/lib/selection";
 
 /**
@@ -136,6 +141,23 @@ function noSubscription(): () => void {
   return () => {};
 }
 
+/** Where a figure on screen came from, shown under its field. */
+type Provenance = {
+  confidence: Confidence | "Your input" | null;
+  text: string;
+};
+
+const YOUR_INPUT: Provenance = { confidence: "Your input", text: "You entered this." };
+const STARTING_NUMBER: Provenance = {
+  confidence: null,
+  text: "A starting number; replace it with your own if you have one.",
+};
+
+/** A Scorecard dollar figure as field text, rounded the way BLS medians are. */
+function figureText(value: number | null | undefined): string | null {
+  return value === null || value === undefined ? null : String(Math.round(value));
+}
+
 type Arrival = "job" | "start" | null;
 
 /** Which page sent the user here: `?from=job` or `?from=start`. */
@@ -166,6 +188,21 @@ export default function CalculatorPage() {
   const from = useSyncExternalStore(noSubscription, arrivedFrom, () => null);
   const profile = useProfile();
   const program = useProgram();
+
+  // The College Scorecard program in play: one picked on this page wins, else
+  // the one picked on the Start screen when the user came from there.
+  const [pickedHere, setPickedHere] = useState<{
+    choice: ScorecardChoice | undefined;
+  } | null>(null);
+  const scorecard =
+    pickedHere !== null
+      ? pickedHere.choice
+      : from === "start"
+        ? program?.scorecard
+        : undefined;
+  const scorecardS1 = figureText(scorecard?.firstYearEarnings.value);
+  const scorecardB = figureText(scorecard?.typicalDebt.value);
+
   const prefill = useMemo(() => {
     const p: Partial<Fields> = {};
     if (from !== null && medianSalary !== null) p.S1 = medianSalary;
@@ -175,21 +212,45 @@ export default function CalculatorPage() {
       if (program?.tuition != null) p.T = String(program.tuition);
       if (program?.years != null) p.L = String(program.years);
     }
+    // SPEC A3: Scorecard's first-year median is the default S1, ahead of the
+    // BLS median (ladder level 4), and its typical debt the default B.
+    if (scorecard !== undefined) {
+      if (pickedHere !== null) {
+        p.program = `${scorecard.title}, ${scorecard.credentialTitle}`;
+        p.school = scorecard.schoolName;
+      }
+      if (scorecardS1 !== null) p.S1 = scorecardS1;
+      if (scorecardB !== null) p.B = scorecardB;
+    }
     return p;
-  }, [from, medianSalary, profile, program]);
+  }, [
+    from,
+    medianSalary,
+    profile,
+    program,
+    scorecard,
+    pickedHere,
+    scorecardS1,
+    scorecardB,
+  ]);
   const fields = useMemo(() => {
     const out = { ...typed };
     for (const key of Object.keys(prefill) as (keyof Fields)[]) {
       if (!touched[key]) out[key] = prefill[key] as string;
     }
-    // When the Start screen supplies tuition, the amount borrowed starts at
-    // SPEC Appendix A's default, max(T − Sch, 0), from the tuition and
-    // scholarships showing here.
-    if (from === "start" && program?.tuition != null && !touched.B) {
+    // When the Start screen supplies tuition and Scorecard has no typical debt,
+    // the amount borrowed starts at SPEC Appendix A's default, max(T − Sch, 0),
+    // from the tuition and scholarships showing here.
+    if (
+      from === "start" &&
+      program?.tuition != null &&
+      scorecardB === null &&
+      !touched.B
+    ) {
       out.B = String(Math.max(num(out.T) - num(out.Sch), 0));
     }
     return out;
-  }, [typed, prefill, touched, from, program]);
+  }, [typed, prefill, touched, from, program, scorecardB]);
 
   const set = (key: keyof Fields) => (value: string) => {
     setTouched((prev) => (prev[key] ? prev : { ...prev, [key]: true }));
@@ -201,6 +262,77 @@ export default function CalculatorPage() {
   const clear = () => {
     set("S1")(fields.S1);
     clearSelection();
+  };
+
+  // Where each pre-fillable figure came from, judged by the value showing, so
+  // a "Use … median" press or a typed number that matches reads correctly.
+  const provenance: Partial<Record<keyof Fields, Provenance>> = {};
+  if (scorecard && scorecardS1 !== null && fields.S1 === scorecardS1) {
+    provenance.S1 = {
+      confidence: scorecard.firstYearEarnings.confidence,
+      text: `${scorecard.source}, ${scorecard.asOf}. ${scorecard.firstYearEarnings.note}`,
+    };
+  } else if (selection && wage && fields.S1 === medianSalary) {
+    provenance.S1 = {
+      confidence: "Low",
+      text: `BLS OEWS${selection.year === null ? "" : ` ${selection.year}`} ${wage.level} median for ${midSentence(selection.title)} in ${wage.place}. That is typical pay for everyone in the job, not this program’s graduates.`,
+    };
+  } else {
+    provenance.S1 = touched.S1 ? YOUR_INPUT : STARTING_NUMBER;
+  }
+
+  if (scorecard && scorecardB !== null && fields.B === scorecardB) {
+    provenance.B = {
+      confidence: scorecard.typicalDebt.confidence,
+      text: `${scorecard.source}, ${scorecard.asOf}. ${scorecard.typicalDebt.note}`,
+    };
+  } else if (touched.B) {
+    provenance.B = YOUR_INPUT;
+  } else if (from === "start" && program?.tuition != null) {
+    provenance.B = {
+      confidence: null,
+      text: "Tuition minus scholarships, assuming you borrow the rest.",
+    };
+  } else {
+    provenance.B = STARTING_NUMBER;
+  }
+
+  const startTuition =
+    from === "start" && program?.tuition != null
+      ? String(program.tuition)
+      : null;
+  provenance.T =
+    touched.T || (startTuition !== null && fields.T === startTuition)
+      ? YOUR_INPUT
+      : scorecard
+        ? {
+            confidence: null,
+            text: "A starting number: College Scorecard doesn’t report graduate tuition, so use the program’s published cost.",
+          }
+        : STARTING_NUMBER;
+
+  const startSalary =
+    from === "start" && profile?.salary != null ? String(profile.salary) : null;
+  provenance.S0 =
+    touched.S0 || (startSalary !== null && fields.S0 === startSalary)
+      ? YOUR_INPUT
+      : STARTING_NUMBER;
+
+  // A pick here is saved to the program store too, so the Start screen shows
+  // the same choice. Tuition and length are kept as they were; the name is
+  // filled only when there isn't one, as on the Start screen.
+  const chooseScorecard = (choice: ScorecardChoice | undefined) => {
+    setPickedHere({ choice });
+    const name = program?.name ?? "";
+    saveProgram({
+      name:
+        choice !== undefined && name.trim() === ""
+          ? `${choice.title}, ${choice.schoolName}`
+          : name,
+      tuition: program?.tuition ?? null,
+      years: program?.years ?? null,
+      ...(choice === undefined ? {} : { scorecard: choice }),
+    });
   };
 
   const inputs = useMemo(() => toModelInputs(fields), [fields]);
@@ -261,6 +393,22 @@ export default function CalculatorPage() {
           onSubmit={(e) => e.preventDefault()}
         >
           <Section
+            title="Find your program"
+            note="Pick a school and program to fill in what its graduates earn and borrow."
+            wide
+          >
+            <ProgramSearch value={scorecard} onChange={chooseScorecard} />
+            {scorecard && (scorecardS1 !== null || scorecardB !== null) && (
+              <p className="text-xs text-muted">
+                {scorecardS1 !== null && "First-year pay fills Starting salary. "}
+                {scorecardB !== null &&
+                  "Typical debt fills Amount borrowed, under Adjust assumptions. "}
+                A number you’ve typed yourself is never replaced.
+              </p>
+            )}
+          </Section>
+
+          <Section
             title="From your start screen"
             note={
               from === "start" ? (
@@ -289,6 +437,7 @@ export default function CalculatorPage() {
               value={fields.S0}
               onChange={set("S0")}
               step={1000}
+              source={provenance.S0}
             />
             <Field
               label="Program"
@@ -305,6 +454,7 @@ export default function CalculatorPage() {
               value={fields.T}
               onChange={set("T")}
               step={1000}
+              source={provenance.T}
             />
             <Field
               label="Program length"
@@ -321,18 +471,27 @@ export default function CalculatorPage() {
               value={fields.S1}
               onChange={set("S1")}
               step={1000}
+              source={provenance.S1}
               action={
-                medianSalary !== null && (
-                  <button
-                    type="button"
-                    disabled={fields.S1 === medianSalary}
-                    className="rounded-full border border-hairline px-2.5 py-0.5 text-xs text-accent hover:border-accent disabled:cursor-default disabled:border-hairline disabled:text-muted"
-                    onClick={() => set("S1")(medianSalary)}
-                  >
-                    {fields.S1 === medianSalary
-                      ? "Using BLS median"
-                      : `Use BLS median (${formatDollars(Number(medianSalary))})`}
-                  </button>
+                (scorecardS1 !== null || medianSalary !== null) && (
+                  <span className="flex flex-wrap gap-1.5">
+                    {scorecardS1 !== null && (
+                      <UseButton
+                        active={fields.S1 === scorecardS1}
+                        activeLabel="Using Scorecard median"
+                        label={`Use Scorecard median (${formatDollars(Number(scorecardS1))})`}
+                        onClick={() => set("S1")(scorecardS1)}
+                      />
+                    )}
+                    {medianSalary !== null && (
+                      <UseButton
+                        active={fields.S1 === medianSalary}
+                        activeLabel="Using BLS median"
+                        label={`Use BLS median (${formatDollars(Number(medianSalary))})`}
+                        onClick={() => set("S1")(medianSalary)}
+                      />
+                    )}
+                  </span>
                 )
               }
             />
@@ -456,6 +615,7 @@ export default function CalculatorPage() {
                   value={fields.B}
                   onChange={set("B")}
                   step={1000}
+                  source={provenance.B}
                 />
                 <Field
                   label="Interest rate"
@@ -514,20 +674,11 @@ export default function CalculatorPage() {
                     </>
                   )}
                 </p>
-                <p className="mt-3 text-xs text-muted">
-                  {selection && wage && fields.S1 === medianSalary ? (
-                    <>
-                      The starting salary is the BLS OEWS {wage.level} median
-                      for {selection.title} in {wage.place}. Every other number
-                      on this page is one you typed.
-                    </>
-                  ) : (
-                    <>
-                      Scorecard medians land here in a later version. For now
-                      every number on this page is one you typed.
-                    </>
-                  )}
-                </p>
+                <ThreeNumbers
+                  scorecard={scorecard}
+                  selection={selection}
+                  breakeven={breakeven}
+                />
               </Card>
 
               <div className="grid gap-4 sm:grid-cols-3">
@@ -692,18 +843,119 @@ function Card({ children }: { children: ReactNode }) {
 function Section({
   title,
   note,
+  wide = false,
   children,
 }: {
   title: string;
   note: ReactNode;
+  /** One column, for content that lays itself out. */
+  wide?: boolean;
   children: ReactNode;
 }) {
   return (
     <Card>
       <h2 className="text-sm font-semibold text-ink">{title}</h2>
       <p className="mt-1 text-xs text-muted">{note}</p>
-      <div className="mt-4 grid gap-4 sm:grid-cols-2">{children}</div>
+      <div className={`mt-4 grid gap-4 ${wide ? "" : "sm:grid-cols-2"}`}>
+        {children}
+      </div>
     </Card>
+  );
+}
+
+function UseButton({
+  active,
+  label,
+  activeLabel,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  activeLabel: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={active}
+      className="rounded-full border border-hairline px-2.5 py-0.5 text-xs text-accent hover:border-accent disabled:cursor-default disabled:border-hairline disabled:text-muted"
+      onClick={onClick}
+    >
+      {active ? activeLabel : label}
+    </button>
+  );
+}
+
+/**
+ * The Build 3 results sentence: what this program's graduates start at, what
+ * BLS says the job typically pays, and the breakeven. A missing number is
+ * said plainly, never guessed.
+ */
+function ThreeNumbers({
+  scorecard,
+  selection,
+  breakeven,
+}: {
+  scorecard: ScorecardChoice | undefined;
+  selection: Selection | null;
+  breakeven: number | null;
+}) {
+  const wage = selection === null ? null : selectedWage(selection);
+  const grads = scorecard?.firstYearEarnings;
+  const sources = [
+    scorecard &&
+      grads?.value != null &&
+      `Graduates: ${scorecard.source}, ${scorecard.asOf}${
+        grads.confidence ? ` (${grads.confidence.toLowerCase()} confidence)` : ""
+      }`,
+    selection &&
+      wage &&
+      `Typical pay: BLS OEWS${selection.year === null ? "" : ` ${selection.year}`}, ${wage.level} median`,
+    breakeven !== null && "Breakeven: your inputs",
+  ].filter(Boolean);
+
+  return (
+    <div className="mt-4 border-t border-hairline pt-3 text-sm leading-relaxed text-ink-secondary">
+      <p>
+        {scorecard === undefined ? (
+          <>Pick a program to see what its graduates earn. </>
+        ) : grads?.value != null ? (
+          <>
+            Graduates of this program start at about{" "}
+            <strong className="font-semibold text-ink">
+              {formatDollars(grads.value)}
+            </strong>
+            .{" "}
+          </>
+        ) : (
+          <>No first-year pay data for this program. </>
+        )}
+        {selection !== null && wage !== null ? (
+          <>
+            BLS says the typical {midSentence(selection.title)} in {wage.place}{" "}
+            earns{" "}
+            <strong className="font-semibold text-ink">
+              {formatDollars(wage.median)}
+            </strong>
+            .{" "}
+          </>
+        ) : (
+          <>Choose a job on the Start screen to compare with typical pay. </>
+        )}
+        {breakeven !== null && (
+          <>
+            You break even if you start at{" "}
+            <strong className="font-semibold text-ink">
+              {formatDollars(breakeven)}
+            </strong>{" "}
+            or more.
+          </>
+        )}
+      </p>
+      {sources.length > 0 && (
+        <p className="mt-1 text-xs text-muted">{sources.join(" · ")}.</p>
+      )}
+    </div>
   );
 }
 
@@ -762,6 +1014,7 @@ function Field({
   max,
   step,
   action,
+  source,
 }: {
   label: string;
   hint: string;
@@ -776,6 +1029,8 @@ function Field({
   step?: number;
   /** A control shown under the field, outside the label so it keeps its own name. */
   action?: ReactNode;
+  /** Where the value showing came from. */
+  source?: Provenance;
 }) {
   const field = (
     <label className="block">
@@ -796,6 +1051,11 @@ function Field({
         {suffix && <span className="pr-2.5 text-sm text-muted">{suffix}</span>}
       </span>
       <span className="mt-1 block text-xs text-muted">{hint}</span>
+      {source && (
+        <span className="mt-1 block text-xs text-ink-secondary">
+          <ConfidenceBadge confidence={source.confidence} /> {source.text}
+        </span>
+      )}
     </label>
   );
   if (!action) return field;
