@@ -1,655 +1,359 @@
 "use client";
 
 import Link from "next/link";
+import { useState, useSyncExternalStore, type ReactNode } from "react";
+import { formatDollars } from "@/lib/format";
 import {
-  useMemo,
-  useState,
-  useSyncExternalStore,
-  type ReactNode,
-} from "react";
-import CumulativeChart from "./cumulative-chart";
-import NextMoves from "./next-moves";
-import { runModel, type ModelInputs } from "@/lib/model";
-import {
-  formatDollars,
-  formatPercent,
-  formatSignedDollars,
-} from "@/lib/format";
-import {
-  clearSelection,
-  selectedWage,
-  useSelection,
+  DEGREES,
+  readProfile,
+  readProgram,
+  readSelection,
+  saveProfile,
+  saveProgram,
+  type Degree,
+  type Profile,
+  type Program,
 } from "@/lib/selection";
+import OccupationPicker, {
+  DEFAULT_CHOICE,
+  useOccupationLookup,
+  type JobChoice,
+  type Load,
+} from "./occupation-picker";
 
 /**
- * Single-page calculator: every input from SPEC.md §4 on the left, the §5
- * outputs on the right, recomputed on every keystroke.
- *
- * v1 scope: manual inputs only — no Scorecard lookup, no accounts, no
- * scenarios. Rates are held in percent units here and converted to decimals
- * at the model boundary; the model itself never rounds.
+ * The Start screen: three short steps instead of the calculator's 19 inputs.
+ * Everything typed here is saved as it changes (see `selection.ts`), and "See
+ * if it pays off" opens the calculator pre-filled from it.
  */
 
-type Fields = {
-  school: string;
-  program: string;
-  credential: string;
-  S0: string;
-  g_work: string;
-  t: string;
-  d: string;
-  H: string;
-  L: string;
-  T: string;
-  Sch: string;
-  PT: string;
-  Living: string;
-  gap: string;
-  S1: string;
-  g_grad: string;
-  B: string;
-  r: string;
-  N: string;
-};
+const MAX_EXPERIENCE = 40;
 
-const DEFAULTS: Fields = {
-  school: "",
-  program: "",
-  credential: "Master’s",
-  S0: "60000",
-  g_work: "3",
-  t: "25",
-  d: "5",
-  H: "10",
-  L: "2",
-  T: "40000",
-  Sch: "0",
-  PT: "0",
-  Living: "0",
-  gap: "3",
-  S1: "85000",
-  g_grad: "4",
-  B: "40000",
-  r: "8",
-  N: "10",
-};
-
-const CREDENTIALS = [
-  "Master’s",
-  "Doctorate",
-  "Graduate certificate",
-  "Other",
-] as const;
-
-function num(value: string): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function toModelInputs(f: Fields): ModelInputs {
-  return {
-    S0: num(f.S0),
-    g_work: num(f.g_work) / 100,
-    t: num(f.t) / 100,
-    d: num(f.d) / 100,
-    H: Math.floor(num(f.H)),
-    L: num(f.L),
-    T: num(f.T),
-    Sch: num(f.Sch),
-    PT: num(f.PT),
-    Living: num(f.Living),
-    gap: num(f.gap),
-    S1: num(f.S1),
-    g_grad: num(f.g_grad) / 100,
-    B: num(f.B),
-    r: num(f.r) / 100,
-    N: num(f.N),
-  };
-}
-
-/** Input combinations the §5 formulas cannot express, caught before the model runs. */
-function problems(inputs: ModelInputs): string[] {
-  const found: string[] = [];
-  if (!(inputs.L > 0)) {
-    found.push("Program length has to be more than 0 years.");
-  }
-  if (!(inputs.H >= 1)) {
-    found.push("Horizon has to be at least 1 year.");
-  }
-  if (inputs.B > 0 && !(inputs.r > 0)) {
-    found.push(
-      "Loan interest rate has to be above 0% when you borrow — the payment formula divides by it.",
-    );
-  }
-  if (inputs.B > 0 && !(inputs.N > 0)) {
-    found.push("Loan term has to be more than 0 years when you borrow.");
-  }
-  return found;
-}
-
-/** The URL never changes under this page, so there is nothing to subscribe to. */
+/** Nothing to subscribe to: this only tells server render from client render. */
 function noSubscription(): () => void {
   return () => {};
 }
 
-function cameFromJobPage(): boolean {
-  return new URLSearchParams(window.location.search).get("from") === "job";
-}
-
-export default function Home() {
-  const [typed, setTyped] = useState<Fields>(DEFAULTS);
-  const [salaryTouched, setSalaryTouched] = useState(false);
-
-  // The job + place chosen on the Job page, if any (SPEC §4.1 → §4.2). The
-  // wage is the metro median when a metro was picked, else the state median.
-  const selection = useSelection();
-  const wage = selection === null ? null : selectedWage(selection);
-  const medianSalary = wage === null ? null : String(Math.round(wage.median));
-
-  // Arriving via the Job page's "Use this in the ROI calculator" button
-  // (/?from=job) starts the salary at the BLS median — until the user edits the
-  // salary, after which what they typed always wins.
-  const fromJob = useSyncExternalStore(
+export default function StartPage() {
+  // The form starts from what was saved last time, which only the browser
+  // knows, so it mounts after hydration rather than flashing defaults.
+  const hydrated = useSyncExternalStore(
     noSubscription,
-    cameFromJobPage,
+    () => true,
     () => false,
   );
-  const fields = useMemo(
-    () =>
-      fromJob && !salaryTouched && medianSalary !== null
-        ? { ...typed, S1: medianSalary }
-        : typed,
-    [typed, fromJob, salaryTouched, medianSalary],
-  );
-
-  const set = (key: keyof Fields) => (value: string) => {
-    if (key === "S1") setSalaryTouched(true);
-    setTyped((prev) => ({ ...prev, [key]: value }));
-  };
-
-  // Clearing the selection must not quietly swap the salary back to the
-  // default, so pin whatever is showing first.
-  const clear = () => {
-    set("S1")(fields.S1);
-    clearSelection();
-  };
-
-  const inputs = useMemo(() => toModelInputs(fields), [fields]);
-  const issues = useMemo(() => problems(inputs), [inputs]);
-  const result = useMemo(
-    () => (issues.length === 0 ? runModel(inputs) : null),
-    [inputs, issues],
-  );
-
-  const horizon = inputs.H;
-  const breakeven = result?.breakevenS1 ?? null;
-  const breakevenGap = breakeven === null ? null : inputs.S1 - breakeven;
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
+    <div className="mx-auto w-full max-w-3xl px-4 py-10 sm:px-6 lg:px-8">
       <header className="mb-8">
         <h1 className="text-2xl font-semibold tracking-tight text-ink">
-          Grad Program ROI
+          Does a degree pay off for you?
         </h1>
         <p className="mt-1 max-w-2xl text-sm text-ink-secondary">
-          Whether a specific graduate program pays off for you, against the
-          alternative of staying in your job. Every figure below is yours to
-          change, and every figure is after tax.
+          Three quick steps: where you are now, the job you want, and the
+          program you’re considering. We’ll fill in the rest with sensible
+          starting numbers you can change later.
         </p>
       </header>
-
-      {selection && wage && (
-        <div className="mb-6 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-hairline bg-surface px-4 py-2 text-sm text-ink-secondary">
-          <span>
-            Planning for:{" "}
-            <span className="font-medium text-ink">
-              {selection.title} in {wage.place}
-            </span>{" "}
-            — BLS median {formatDollars(wage.median)}
-            {selection.year === null ? "" : ` (${selection.year})`}
-          </span>
-          <span className="flex items-center gap-3 text-xs">
-            <Link href="/job" className="text-accent hover:underline">
-              change
-            </Link>
-            <button
-              type="button"
-              className="text-muted hover:text-ink hover:underline"
-              onClick={clear}
-            >
-              clear
-            </button>
-          </span>
-        </div>
+      {hydrated ? (
+        <StartForm />
+      ) : (
+        <p className="text-sm text-ink-secondary">Loading…</p>
       )}
+    </div>
+  );
+}
 
-      <div className="grid gap-6 lg:grid-cols-12">
-        {/* ---------------------------------------------------------------- */}
-        {/* Inputs (SPEC §4)                                                  */}
-        {/* ---------------------------------------------------------------- */}
-        <form
-          className="flex flex-col gap-6 lg:col-span-5"
-          onSubmit={(e) => e.preventDefault()}
-        >
-          <Section
-            title="About you"
-            note="The path where you skip the program and keep working."
-          >
-            <Field
-              label="Current salary"
-              hint="Pre-tax, per year. The offer you already have counts."
-              prefix="$"
-              value={fields.S0}
-              onChange={set("S0")}
-              step={1000}
-            />
-            <Field
-              label="Raise rate if you keep working"
-              hint="Average annual raise, compounded once a year."
-              suffix="%"
-              value={fields.g_work}
-              onChange={set("g_work")}
-              step={0.5}
-            />
-            <Field
-              label="Effective tax rate"
-              hint="One flat rate on all income, to keep the model explainable."
-              suffix="%"
-              value={fields.t}
-              onChange={set("t")}
-              step={1}
-            />
-            <Field
-              label="Discount rate"
-              hint="How much less a dollar next year is worth to you than one today."
-              suffix="%"
-              value={fields.d}
-              onChange={set("d")}
-              step={0.5}
-            />
-            <Field
-              label="Horizon"
-              hint="How many years out to look. 5 to 20."
-              suffix="years"
-              value={fields.H}
-              onChange={set("H")}
-              min={5}
-              max={20}
-              step={1}
-            />
-          </Section>
+/* -------------------------------------------------------------------------- */
+/* The form                                                                    */
+/* -------------------------------------------------------------------------- */
 
-          <Section
-            title="About the program"
-            note="Typed in by hand for now — the Scorecard lookup comes later."
-          >
-            <Field
-              label="School"
-              hint="For your own reference; it does not change the math."
-              type="text"
-              placeholder="Cal Poly San Luis Obispo"
-              value={fields.school}
-              onChange={set("school")}
-            />
-            <Field
-              label="Program"
-              hint="For your own reference; it does not change the math."
-              type="text"
-              placeholder="MS Business Analytics"
-              value={fields.program}
-              onChange={set("program")}
-            />
-            <Select
-              label="Credential level"
-              hint="What you walk away with."
-              value={fields.credential}
-              onChange={set("credential")}
-              options={CREDENTIALS}
-            />
-            <Field
-              label="Program length"
-              hint="Years. Fractions are fine — a 10-month program is 0.83."
-              suffix="years"
-              value={fields.L}
-              onChange={set("L")}
-              step={0.5}
-            />
-            <Field
-              label="Tuition and fees"
-              hint="The whole program, not per year."
-              prefix="$"
-              value={fields.T}
-              onChange={set("T")}
-              step={1000}
-            />
-            <Field
-              label="Scholarships and grants"
-              hint="Total across the program. Money you never pay back."
-              prefix="$"
-              value={fields.Sch}
-              onChange={set("Sch")}
-              step={1000}
-            />
-            <Field
-              label="Part-time earnings while enrolled"
-              hint="Pre-tax, per year, if you plan to keep working."
-              prefix="$"
-              value={fields.PT}
-              onChange={set("PT")}
-              step={1000}
-            />
-            <Field
-              label="Extra living cost while enrolled"
-              hint="Per year, and only what the program adds — relocation, say."
-              prefix="$"
-              value={fields.Living}
-              onChange={set("Living")}
-              step={1000}
-            />
-            <Field
-              label="Job search after the program"
-              hint="Months between finishing and the first paycheck."
-              suffix="months"
-              value={fields.gap}
-              onChange={set("gap")}
-              step={1}
-            />
-            <Field
-              label="Starting salary after the program"
-              hint="Pre-tax, per year. The number the whole answer hangs on."
-              prefix="$"
-              value={fields.S1}
-              onChange={set("S1")}
-              step={1000}
-              action={
-                medianSalary !== null && (
-                  <button
-                    type="button"
-                    disabled={fields.S1 === medianSalary}
-                    className="rounded-full border border-hairline px-2.5 py-0.5 text-xs text-accent hover:border-accent disabled:cursor-default disabled:border-hairline disabled:text-muted"
-                    onClick={() => set("S1")(medianSalary)}
-                  >
-                    {fields.S1 === medianSalary
-                      ? "Using BLS median"
-                      : `Use BLS median (${formatDollars(Number(medianSalary))})`}
-                  </button>
-                )
-              }
-            />
-            <Field
-              label="Raise rate after the program"
-              hint="Often a point above your current raise rate."
-              suffix="%"
-              value={fields.g_grad}
-              onChange={set("g_grad")}
-              step={0.5}
-            />
-          </Section>
+type ProfileFields = { salary: string; experience: string; degree: string };
+type ProgramFields = { name: string; tuition: string; years: string };
 
-          <Section
-            title="Loans"
-            note="Payments start the day the program ends; no grace period in v1."
-          >
-            <Field
-              label="Amount borrowed"
-              hint="Usually tuition minus scholarships, unless savings cover part."
-              prefix="$"
-              value={fields.B}
-              onChange={set("B")}
-              step={1000}
-            />
-            <Field
-              label="Interest rate"
-              hint="Per year, on the borrowed balance."
-              suffix="%"
-              value={fields.r}
-              onChange={set("r")}
-              step={0.5}
-            />
-            <Field
-              label="Term"
-              hint="Years to repay. Standard federal terms are 10."
-              suffix="years"
-              value={fields.N}
-              onChange={set("N")}
-              step={1}
-            />
-          </Section>
-        </form>
+function StartForm() {
+  const [profile, setProfile] = useState<ProfileFields>(() =>
+    toProfileFields(readProfile()),
+  );
+  const [program, setProgram] = useState<ProgramFields>(() =>
+    toProgramFields(readProgram()),
+  );
+  const [choice, setChoice] = useState<JobChoice>(() => {
+    const saved = readSelection();
+    return saved === null
+      ? DEFAULT_CHOICE
+      : {
+          soc: saved.soc,
+          stateFips: saved.stateFips,
+          metroCode: saved.metroCode ?? null,
+        };
+  });
+  // Asks BLS and saves the choice for the calculator, as the Job page does.
+  const load = useOccupationLookup(choice);
 
-        {/* ---------------------------------------------------------------- */}
-        {/* Results (SPEC §5)                                                 */}
-        {/* ---------------------------------------------------------------- */}
-        <div className="flex flex-col gap-6 lg:col-span-7">
-          {issues.length > 0 || result === null ? (
-            <Card>
-              <h2 className="text-sm font-semibold text-ink">
-                Check a couple of inputs
-              </h2>
-              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-ink-secondary">
-                {issues.map((issue) => (
-                  <li key={issue}>{issue}</li>
+  const updateProfile = (key: keyof ProfileFields) => (value: string) => {
+    const next = { ...profile, [key]: value };
+    setProfile(next);
+    saveProfile(fromProfileFields(next));
+  };
+  const updateProgram = (key: keyof ProgramFields) => (value: string) => {
+    const next = { ...program, [key]: value };
+    setProgram(next);
+    saveProgram(fromProgramFields(next));
+  };
+
+  const salary = positive(profile.salary);
+  const experienceOutOfRange =
+    profile.experience.trim() !== "" &&
+    fromProfileFields(profile).experienceYears === null;
+  const ready = salary !== null && load.state !== "loading";
+
+  return (
+    <div className="flex flex-col gap-6">
+      <Step number={1} title="Where are you now">
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Field
+            label="Current salary"
+            hint="Pre-tax, per year. Required."
+            prefix="$"
+            value={profile.salary}
+            onChange={updateProfile("salary")}
+            step={1000}
+          />
+          <Field
+            label="Years of work experience"
+            hint={
+              experienceOutOfRange
+                ? `Enter a number from 0 to ${MAX_EXPERIENCE}.`
+                : `0 to ${MAX_EXPERIENCE}.`
+            }
+            suffix="years"
+            value={profile.experience}
+            onChange={updateProfile("experience")}
+            min={0}
+            max={MAX_EXPERIENCE}
+            step={1}
+          />
+          <label className="block">
+            <span className="text-sm font-medium text-ink">Highest degree</span>
+            <span className={fieldShell}>
+              <select
+                className={fieldInput}
+                value={profile.degree}
+                onChange={(e) => updateProfile("degree")(e.target.value)}
+              >
+                <option value="">Choose one</option>
+                {DEGREES.map((d) => (
+                  <option key={d.value} value={d.value}>
+                    {d.label}
+                  </option>
                 ))}
-              </ul>
-            </Card>
-          ) : (
-            <>
-              <Card>
-                <p className="text-lg leading-relaxed text-ink">
-                  {breakeven === null ? (
-                    <>
-                      No working years fall inside a {horizon}-year horizon, so
-                      there is no breakeven salary to compute. Try a longer
-                      horizon or a shorter program.
-                    </>
-                  ) : (
-                    <>
-                      This program pays off within {horizon} years if you earn at
-                      least{" "}
-                      <strong className="font-semibold text-accent">
-                        {formatDollars(breakeven)}
-                      </strong>{" "}
-                      to start. You entered {formatDollars(inputs.S1)}.
-                    </>
-                  )}
-                </p>
-                <p className="mt-3 text-xs text-muted">
-                  {selection && wage && fields.S1 === medianSalary ? (
-                    <>
-                      The starting salary is the BLS OEWS {wage.level} median
-                      for {selection.title} in {wage.place}. Every other number
-                      on this page is one you typed.
-                    </>
-                  ) : (
-                    <>
-                      Scorecard medians land here in a later version. For now
-                      every number on this page is one you typed.
-                    </>
-                  )}
-                </p>
-              </Card>
-
-              <div className="grid gap-4 sm:grid-cols-3">
-                <Stat
-                  label="Payback year"
-                  value={
-                    result.paybackYear === null
-                      ? "None"
-                      : `Year ${result.paybackYear}`
-                  }
-                  note={
-                    result.paybackYear === null
-                      ? `Cumulative cash never catches up within ${horizon} years.`
-                      : "First year the program pulls ahead in cumulative cash."
-                  }
-                />
-                <Stat
-                  label={`NPV over ${horizon} years`}
-                  value={formatSignedDollars(result.npv)}
-                  note={`Today’s dollars at a ${formatPercent(
-                    num(fields.d),
-                  )} discount rate.`}
-                />
-                <Stat
-                  label="Breakeven starting salary"
-                  value={breakeven === null ? "—" : formatDollars(breakeven)}
-                  note={
-                    breakevenGap === null
-                      ? "Needs at least one working year in the horizon."
-                      : breakevenGap >= 0
-                        ? `${formatDollars(
-                            breakevenGap,
-                          )} below the salary you entered.`
-                        : `${formatDollars(
-                            -breakevenGap,
-                          )} above the salary you entered.`
-                  }
-                />
-              </div>
-
-              {selection && breakeven !== null && (
-                <NextMoves breakevenS1={breakeven} selection={selection} />
-              )}
-
-              <Card>
-                <h2 className="text-sm font-semibold text-ink">
-                  Cumulative cash difference
-                </h2>
-                <p className="mt-1 text-xs text-ink-secondary">
-                  Program minus keeping your job, after tax, added up year by
-                  year. Above the zero line, the program is ahead.
-                </p>
-                <div className="mt-4">
-                  <CumulativeChart
-                    years={result.years}
-                    paybackYear={result.paybackYear}
-                  />
-                </div>
-
-                <details className="mt-4 border-t border-hairline pt-3">
-                  <summary className="cursor-pointer text-xs font-medium text-ink-secondary">
-                    Year-by-year table
-                  </summary>
-                  <div className="mt-3 overflow-x-auto">
-                    <table className="w-full text-right text-xs tabular-nums">
-                      <thead className="text-muted">
-                        <tr>
-                          <th className="py-1 pr-3 text-left font-medium">
-                            Year
-                          </th>
-                          <th className="py-1 pr-3 font-medium">Keep working</th>
-                          <th className="py-1 pr-3 font-medium">Program</th>
-                          <th className="py-1 pr-3 font-medium">Difference</th>
-                          <th className="py-1 font-medium">Cumulative</th>
-                        </tr>
-                      </thead>
-                      <tbody className="text-ink-secondary">
-                        {result.years.map((y) => (
-                          <tr key={y.k} className="border-t border-hairline">
-                            <td className="py-1 pr-3 text-left">{y.k}</td>
-                            <td className="py-1 pr-3">
-                              {formatDollars(y.cfA)}
-                            </td>
-                            <td className="py-1 pr-3">
-                              {formatDollars(y.cfB)}
-                            </td>
-                            <td className="py-1 pr-3">
-                              {formatSignedDollars(y.diff)}
-                            </td>
-                            <td className="py-1">
-                              {formatSignedDollars(y.cumDiff)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </details>
-              </Card>
-
-              <Card>
-                <h2 className="text-sm font-semibold text-ink">
-                  What this assumes
-                </h2>
-                <ul className="mt-2 space-y-1 text-xs text-ink-secondary">
-                  <li>
-                    One flat {formatPercent(num(fields.t))} tax rate on all
-                    income — no brackets, no state tax.
-                  </li>
-                  <li>
-                    Loan payments of{" "}
-                    {formatDollars(result.loanPayment)} a year start the moment
-                    the program ends, and run {fields.N} years.
-                  </li>
-                  <li>
-                    Out-of-pocket school cost of{" "}
-                    {formatDollars(result.schoolCostPerYear)} per school-year;
-                    borrowed money is excluded here because it comes back as the
-                    loan payment.
-                  </li>
-                  <li>
-                    The new salary starts at{" "}
-                    {result.salaryStart.toFixed(2).replace(/\.00$/, "")} years
-                    from today, and raises compound once a year.
-                  </li>
-                  <li>
-                    Nothing here prices the non-financial value of the degree.
-                  </li>
-                </ul>
-              </Card>
-            </>
-          )}
+              </select>
+            </span>
+            <span className="mt-1 block text-xs text-muted">
+              The one you have now.
+            </span>
+          </label>
         </div>
+      </Step>
+
+      <Step number={2} title="What job do you want">
+        <OccupationPicker value={choice} onChange={setChoice} />
+        <div className="mt-4 rounded-md bg-plane px-3 py-2 text-sm text-ink-secondary">
+          <MedianLine load={load} choice={choice} />
+        </div>
+      </Step>
+
+      <Step number={3} title="What program are you considering">
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Field
+            label="Program name"
+            hint="For your own reference."
+            type="text"
+            placeholder="MS Business Analytics"
+            value={program.name}
+            onChange={updateProgram("name")}
+          />
+          <Field
+            label="Total tuition and fees"
+            hint="The whole program, not per year."
+            prefix="$"
+            value={program.tuition}
+            onChange={updateProgram("tuition")}
+            step={1000}
+          />
+          <Field
+            label="Program length"
+            hint="Years. A 10-month program is 0.83."
+            suffix="years"
+            value={program.years}
+            onChange={updateProgram("years")}
+            step={0.5}
+          />
+        </div>
+        <p className="mt-3 text-xs text-muted">
+          Soon: search a real program and we’ll fill these in from College
+          Scorecard.
+        </p>
+      </Step>
+
+      <div className="flex flex-wrap items-center gap-3">
+        {ready ? (
+          <Link
+            href="/calculator?from=start"
+            className="inline-flex items-center rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+          >
+            See if it pays off
+          </Link>
+        ) : (
+          <span
+            aria-disabled="true"
+            className="inline-flex cursor-not-allowed items-center rounded-md bg-accent px-4 py-2 text-sm font-medium text-white opacity-40"
+          >
+            See if it pays off
+          </span>
+        )}
+        <span className="text-xs text-muted">
+          {salary === null
+            ? "Enter your current salary first."
+            : load.state === "loading"
+              ? "Waiting for BLS pay figures…"
+              : "Anything you left blank uses a starting number you can change."}
+        </span>
       </div>
     </div>
   );
+}
+
+/** Step 2's inline answer: the BLS median the calculator will start from. */
+function MedianLine({ load, choice }: { load: Load; choice: JobChoice }) {
+  if (load.state === "loading") return <>Asking BLS…</>;
+  if (load.state === "error") {
+    return (
+      <>
+        No BLS figure right now: {load.message} The calculator will use its own
+        starting salary instead.
+      </>
+    );
+  }
+
+  const { data } = load;
+  const title = data.occupation?.title ?? "this job";
+  const stateName = data.state.name ?? "your state";
+  const stateMedian = data.state.medianAnnualWage;
+  const metroMedian = data.metro.medianAnnualWage;
+  const useMetro = choice.metroCode !== null && metroMedian.value !== null;
+  const figure = useMetro ? metroMedian : stateMedian;
+  const place = useMetro ? (data.metro.name ?? "your metro area") : stateName;
+
+  if (figure.value === null) {
+    return (
+      <>
+        BLS publishes no median pay for {title} in {stateName}, so the
+        calculator will use its own starting salary instead.
+      </>
+    );
+  }
+
+  const year = figure.year ?? data.asOfYear;
+  return (
+    <>
+      Typical pay for {title} in {place}:{" "}
+      <strong className="font-semibold text-ink">
+        {formatDollars(figure.value)}
+      </strong>{" "}
+      a year.{" "}
+      <span className="text-xs text-muted">
+        BLS OEWS {useMetro ? "metro area" : "state"} median
+        {year === null ? "" : `, ${year}`}.
+        {choice.metroCode !== null && !useMetro
+          ? " No figure published for that metro area, so this is the state median."
+          : ""}
+      </span>
+    </>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Converting between typed text and saved values                              */
+/* -------------------------------------------------------------------------- */
+
+/** A typed number, or null when the box is empty or not a number. */
+function amount(text: string): number | null {
+  if (text.trim() === "") return null;
+  const value = Number(text);
+  return Number.isFinite(value) ? value : null;
+}
+
+function positive(text: string): number | null {
+  const value = amount(text);
+  return value !== null && value > 0 ? value : null;
+}
+
+function isDegree(value: string): value is Degree {
+  return DEGREES.some((d) => d.value === value);
+}
+
+function fromProfileFields(f: ProfileFields): Profile {
+  const experience = amount(f.experience);
+  return {
+    salary: positive(f.salary),
+    experienceYears:
+      experience !== null && experience >= 0 && experience <= MAX_EXPERIENCE
+        ? experience
+        : null,
+    degree: isDegree(f.degree) ? f.degree : null,
+  };
+}
+
+function toProfileFields(p: Profile | null): ProfileFields {
+  return {
+    salary: p?.salary == null ? "" : String(p.salary),
+    experience: p?.experienceYears == null ? "" : String(p.experienceYears),
+    degree: p?.degree ?? "",
+  };
+}
+
+function fromProgramFields(f: ProgramFields): Program {
+  const tuition = amount(f.tuition);
+  return {
+    name: f.name.trim(),
+    tuition: tuition !== null && tuition >= 0 ? tuition : null,
+    years: positive(f.years),
+  };
+}
+
+function toProgramFields(p: Program | null): ProgramFields {
+  return {
+    name: p?.name ?? "",
+    tuition: p?.tuition == null ? "" : String(p.tuition),
+    years: p?.years == null ? "" : String(p.years),
+  };
 }
 
 /* -------------------------------------------------------------------------- */
 /* Pieces                                                                      */
 /* -------------------------------------------------------------------------- */
 
-function Card({ children }: { children: ReactNode }) {
-  return (
-    <section className="rounded-xl border border-hairline bg-surface p-5">
-      {children}
-    </section>
-  );
-}
-
-function Section({
+function Step({
+  number,
   title,
-  note,
   children,
 }: {
+  number: number;
   title: string;
-  note: string;
   children: ReactNode;
 }) {
   return (
-    <Card>
-      <h2 className="text-sm font-semibold text-ink">{title}</h2>
-      <p className="mt-1 text-xs text-muted">{note}</p>
-      <div className="mt-4 grid gap-4 sm:grid-cols-2">{children}</div>
-    </Card>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  note,
-}: {
-  label: string;
-  value: string;
-  note: string;
-}) {
-  return (
-    <div className="rounded-xl border border-hairline bg-surface p-4">
-      <p className="text-xs font-medium text-muted">{label}</p>
-      <p className="mt-1 text-2xl font-semibold text-ink">{value}</p>
-      <p className="mt-1 text-xs text-ink-secondary">{note}</p>
-    </div>
+    <section className="rounded-xl border border-hairline bg-surface p-5">
+      <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-ink">
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-accent text-xs text-white">
+          {number}
+        </span>
+        {title}
+      </h2>
+      {children}
+    </section>
   );
 }
 
@@ -670,7 +374,6 @@ function Field({
   min,
   max,
   step,
-  action,
 }: {
   label: string;
   hint: string;
@@ -683,10 +386,8 @@ function Field({
   min?: number;
   max?: number;
   step?: number;
-  /** A control shown under the field, outside the label so it keeps its own name. */
-  action?: ReactNode;
 }) {
-  const field = (
+  return (
     <label className="block">
       <span className="text-sm font-medium text-ink">{label}</span>
       <span className={fieldShell}>
@@ -703,47 +404,6 @@ function Field({
           onChange={(e) => onChange(e.target.value)}
         />
         {suffix && <span className="pr-2.5 text-sm text-muted">{suffix}</span>}
-      </span>
-      <span className="mt-1 block text-xs text-muted">{hint}</span>
-    </label>
-  );
-  if (!action) return field;
-  return (
-    <div>
-      {field}
-      <div className="mt-1.5">{action}</div>
-    </div>
-  );
-}
-
-function Select({
-  label,
-  hint,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  hint: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: readonly string[];
-}) {
-  return (
-    <label className="block">
-      <span className="text-sm font-medium text-ink">{label}</span>
-      <span className={fieldShell}>
-        <select
-          className={fieldInput}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-        >
-          {options.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))}
-        </select>
       </span>
       <span className="mt-1 block text-xs text-muted">{hint}</span>
     </label>

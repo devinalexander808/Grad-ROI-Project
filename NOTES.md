@@ -143,6 +143,35 @@ One entry per commit, oldest first. Built with Claude Code; deployed on Vercel.
   acceptance checks; no app code changes yet.
 - **Bugs:** None.
 
+## 2026-10-03 — Add guided start screen; move calculator to /calculator
+
+- **Built:** PLAN Build 1. `/` is now a three-step Start screen: where you are
+  now (salary, experience, highest degree), the job you want (occupation,
+  state, metro, with the BLS median shown inline with source and year), and
+  the program you're considering (name, tuition, length). It saves as you type
+  to new optional `profile` and `program` stores in `selection.ts`, and "See if
+  it pays off" opens `/calculator?from=start`. The calculator moved to
+  `/calculator` (heading now "ROI calculator"): the five Start screen inputs
+  sit on top under "From your start screen", the other 14 fold under "Adjust
+  assumptions" (closed by default, one-sentence hints), and a "Model limits"
+  card lists flat tax, no job-landing risk, and no non-money value. The job
+  search and state/metro pickers plus the BLS lookup moved into a shared
+  `occupation-picker.tsx` used by the Job page and the Start screen. Nav is now
+  Start / Job / Calculator; the tab title is "Pathfinder". `model.ts`
+  untouched, no new dependencies.
+- **Prompt intent:** Nobody should face 19 inputs first. Ask three short
+  questions, then show the answer with every assumption still one click away.
+- **Bug — amount borrowed ignored the Start screen tuition:** The first draft
+  pre-filled tuition but left amount borrowed at the $40,000 default, so a
+  $55,000 program modelled $15,000 of tuition as paid in cash. Caught in diff
+  review before shipping. **Fix:** when the Start screen supplies tuition,
+  amount borrowed starts at SPEC Appendix A's default, max(T − Sch, 0), from
+  the tuition and scholarships on screen, until the user edits it.
+- **Verified:** In the browser, Start ($62,000, MS Finance, $55,000, 1.5
+  years, San Luis Obispo) → calculator showed all five values and the SLO
+  median ($102,970); the Job page's button still pre-fills only the starting
+  salary.
+
 ---
 
 ## How I work with Claude Code

@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Grad Program ROI",
+  title: "Pathfinder",
   description:
     "Whether a specific graduate program pays off for you, using your own numbers.",
 };

@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 /**
- * One line of navigation, one link per section of SPEC.md §4. "The path",
+ * One line of navigation: the Start screen, then one link per section of SPEC.md §4. "The path",
  * "the news" and "next moves" arrive in weeks 8 and 9 (§8).
  */
 export default function Nav() {
@@ -11,8 +11,9 @@ export default function Nav() {
         <span className="mr-3 text-sm font-semibold tracking-tight text-ink">
           Pathfinder
         </span>
+        <NavLink href="/">Start</NavLink>
         <NavLink href="/job">Job</NavLink>
-        <NavLink href="/">ROI calculator</NavLink>
+        <NavLink href="/calculator">Calculator</NavLink>
       </div>
     </nav>
   );

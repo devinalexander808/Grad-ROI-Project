@@ -3,13 +3,18 @@
 import { useSyncExternalStore } from "react";
 
 /**
- * The user's job + location choice, carried from the Job page (SPEC §4.1) into
- * the ROI calculator (§4.2) and the Next moves card (§4.4). One localStorage
- * key, so every tab sees the same selection.
+ * What the user has told us so far, carried between pages in localStorage so
+ * every tab sees the same thing:
  *
- * Only medians travel: the state one always, and a metro one when the user
- * picked a metro and BLS published a figure for it. The calculator offers the
- * most local of the two as a starting salary (see `selectedWage`).
+ * - `Selection`: the job + location choice, from the Job page or the Start
+ *   screen (SPEC §4.1) into the ROI calculator (§4.2) and Next moves (§4.4).
+ * - `Profile`: where the user is now (Start screen step 1). Optional.
+ * - `Program`: the program they're considering (Start screen step 3). Optional.
+ *
+ * Only medians travel in a selection: the state one always, and a metro one
+ * when the user picked a metro and BLS published a figure for it. The
+ * calculator offers the most local of the two as a starting salary (see
+ * `selectedWage`).
  */
 
 export interface Selection {
@@ -28,6 +33,33 @@ export interface Selection {
   metroName?: string;
   /** BLS OEWS median annual wage for the occupation in that metro. */
   metroMedian?: number;
+}
+
+export const DEGREES = [
+  { value: "high-school", label: "High school" },
+  { value: "associate", label: "Associate" },
+  { value: "bachelors", label: "Bachelor’s" },
+  { value: "masters", label: "Master’s" },
+  { value: "other", label: "Other" },
+] as const;
+
+export type Degree = (typeof DEGREES)[number]["value"];
+
+/** Start screen step 1. Null means "not answered yet". */
+export interface Profile {
+  /** Pre-tax, per year. */
+  salary: number | null;
+  /** 0–40. */
+  experienceYears: number | null;
+  degree: Degree | null;
+}
+
+/** Start screen step 3. Null means "not answered yet". */
+export interface Program {
+  name: string;
+  /** The whole program, not per year. */
+  tuition: number | null;
+  years: number | null;
 }
 
 export interface SelectedWage {
@@ -57,103 +89,187 @@ export function selectedWage(selection: Selection): SelectedWage {
   };
 }
 
-const STORAGE_KEY = "pathfinder.selection";
+/* -------------------------------------------------------------------------- */
+/* Validation                                                                  */
+/* -------------------------------------------------------------------------- */
 
-/** `storage` only fires in other tabs; this tells the current one. */
-const CHANGE_EVENT = "pathfinder:selection";
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isNumberOrNull(value: unknown): value is number | null {
+  return value === null || isFiniteNumber(value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
 
 function isSelection(value: unknown): value is Selection {
-  if (typeof value !== "object" || value === null) return false;
-  const v = value as Record<string, unknown>;
+  if (!isRecord(value)) return false;
+  const v = value;
   const metroFields = [v.metroCode, v.metroName, v.metroMedian];
   const metroOk =
     metroFields.every((f) => f === undefined) ||
     (typeof v.metroCode === "string" &&
       typeof v.metroName === "string" &&
-      typeof v.metroMedian === "number" &&
-      Number.isFinite(v.metroMedian));
+      isFiniteNumber(v.metroMedian));
   return (
     metroOk &&
     typeof v.soc === "string" &&
     typeof v.title === "string" &&
     typeof v.stateFips === "string" &&
     typeof v.stateName === "string" &&
-    typeof v.stateMedian === "number" &&
-    Number.isFinite(v.stateMedian) &&
+    isFiniteNumber(v.stateMedian) &&
     (v.year === null || typeof v.year === "number")
   );
 }
 
-function readRaw(): string | null {
-  try {
-    return window.localStorage.getItem(STORAGE_KEY);
-  } catch {
-    // Private windows and blocked site data throw; treat as "nothing saved".
-    return null;
-  }
+function isProfile(value: unknown): value is Profile {
+  if (!isRecord(value)) return false;
+  return (
+    isNumberOrNull(value.salary) &&
+    isNumberOrNull(value.experienceYears) &&
+    (value.degree === null ||
+      DEGREES.some((d) => d.value === value.degree))
+  );
 }
 
-function parse(raw: string | null): Selection | null {
-  if (raw === null) return null;
-  try {
-    const value: unknown = JSON.parse(raw);
-    return isSelection(value) ? value : null;
-  } catch {
-    return null;
-  }
+function isProgram(value: unknown): value is Program {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.name === "string" &&
+    isNumberOrNull(value.tuition) &&
+    isNumberOrNull(value.years)
+  );
 }
 
-export function saveSelection(selection: Selection): void {
-  const raw = JSON.stringify(selection);
-  if (raw === readRaw()) return;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, raw);
-  } catch {
-    return;
-  }
-  window.dispatchEvent(new Event(CHANGE_EVENT));
+/* -------------------------------------------------------------------------- */
+/* Storage                                                                     */
+/* -------------------------------------------------------------------------- */
+
+interface Store<T> {
+  get: () => T | null;
+  save: (value: T) => void;
+  clear: () => void;
+  subscribe: (onChange: () => void) => () => void;
 }
 
-export function clearSelection(): void {
-  try {
-    window.localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    return;
-  }
-  window.dispatchEvent(new Event(CHANGE_EVENT));
-}
+/** One localStorage key, read through useSyncExternalStore. */
+function createStore<T>(
+  key: string,
+  isValid: (value: unknown) => value is T,
+): Store<T> {
+  /** `storage` only fires in other tabs; this tells the current one. */
+  const changeEvent = `${key}:change`;
 
-function subscribe(onChange: () => void): () => void {
-  const onStorage = (event: StorageEvent) => {
-    if (event.key === STORAGE_KEY || event.key === null) onChange();
+  function readRaw(): string | null {
+    try {
+      return window.localStorage.getItem(key);
+    } catch {
+      // Private windows and blocked site data throw; treat as "nothing saved".
+      return null;
+    }
+  }
+
+  function parse(raw: string | null): T | null {
+    if (raw === null) return null;
+    try {
+      const value: unknown = JSON.parse(raw);
+      return isValid(value) ? value : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // useSyncExternalStore needs a stable snapshot: re-parse only when the
+  // stored string actually changes, otherwise hand back the same object.
+  let cachedRaw: string | null = null;
+  let cachedValue: T | null = null;
+
+  return {
+    get() {
+      const raw = readRaw();
+      if (raw !== cachedRaw) {
+        cachedRaw = raw;
+        cachedValue = parse(raw);
+      }
+      return cachedValue;
+    },
+    save(value) {
+      const raw = JSON.stringify(value);
+      if (raw === readRaw()) return;
+      try {
+        window.localStorage.setItem(key, raw);
+      } catch {
+        return;
+      }
+      window.dispatchEvent(new Event(changeEvent));
+    },
+    clear() {
+      try {
+        window.localStorage.removeItem(key);
+      } catch {
+        return;
+      }
+      window.dispatchEvent(new Event(changeEvent));
+    },
+    subscribe(onChange) {
+      const onStorage = (event: StorageEvent) => {
+        if (event.key === key || event.key === null) onChange();
+      };
+      window.addEventListener("storage", onStorage);
+      window.addEventListener(changeEvent, onChange);
+      return () => {
+        window.removeEventListener("storage", onStorage);
+        window.removeEventListener(changeEvent, onChange);
+      };
+    },
   };
-  window.addEventListener("storage", onStorage);
-  window.addEventListener(CHANGE_EVENT, onChange);
-  return () => {
-    window.removeEventListener("storage", onStorage);
-    window.removeEventListener(CHANGE_EVENT, onChange);
-  };
 }
 
-// useSyncExternalStore needs a stable snapshot: re-parse only when the stored
-// string actually changes, otherwise hand back the same object.
-let cachedRaw: string | null = null;
-let cachedSelection: Selection | null = null;
-
-function getSnapshot(): Selection | null {
-  const raw = readRaw();
-  if (raw !== cachedRaw) {
-    cachedRaw = raw;
-    cachedSelection = parse(raw);
-  }
-  return cachedSelection;
-}
-
-function getServerSnapshot(): Selection | null {
+function getServerSnapshot(): null {
   return null;
 }
 
+const selectionStore = createStore("pathfinder.selection", isSelection);
+const profileStore = createStore("pathfinder.profile", isProfile);
+const programStore = createStore("pathfinder.program", isProgram);
+
+export const saveSelection = selectionStore.save;
+export const clearSelection = selectionStore.clear;
+/** Read once, outside React. Null when nothing valid is saved. */
+export const readSelection = selectionStore.get;
+
+export const saveProfile = profileStore.save;
+export const readProfile = profileStore.get;
+
+export const saveProgram = programStore.save;
+export const readProgram = programStore.get;
+
 /** The saved selection, or null. Null on the server and during hydration. */
 export function useSelection(): Selection | null {
-  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  return useSyncExternalStore(
+    selectionStore.subscribe,
+    selectionStore.get,
+    getServerSnapshot,
+  );
+}
+
+/** The saved Start screen profile, or null. Null on the server and during hydration. */
+export function useProfile(): Profile | null {
+  return useSyncExternalStore(
+    profileStore.subscribe,
+    profileStore.get,
+    getServerSnapshot,
+  );
+}
+
+/** The saved Start screen program, or null. Null on the server and during hydration. */
+export function useProgram(): Program | null {
+  return useSyncExternalStore(
+    programStore.subscribe,
+    programStore.get,
+    getServerSnapshot,
+  );
 }
