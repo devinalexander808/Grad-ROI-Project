@@ -25,6 +25,24 @@
   }
 }
 
+/*
+ * Native <select> popups. The selects are bg-transparent inside an opaque
+ * field shell, and Chrome on Windows paints the open list from the select's own
+ * background — transparent falls back to white while the text stays --ink, so
+ * in dark mode the list looked blank. Make the select itself opaque (unlayered,
+ * so it wins over Tailwind's bg-transparent) and give the options the theme
+ * colours as a backstop.
+ */
+select {
+  background-color: var(--surface);
+  color: var(--ink);
+}
+
+select option {
+  background: var(--surface);
+  color: var(--ink);
+}
+
 @theme inline {
   --color-plane: var(--plane);
   --color-surface: var(--surface);

@@ -255,6 +255,25 @@ One entry per commit, oldest first. Built with Claude Code; deployed on Vercel.
   Care Nurses survives a reload on both pages; the dropdown is readable with
   the light and dark theme colours.
 
+## 2026-10-05 — Fix native dropdown colors in dark mode
+
+- **Built:** Two unlayered rules in `globals.css`: `select` gets
+  `background-color: var(--surface)` and `color: var(--ink)`, so the select
+  itself is opaque and beats Tailwind's `bg-transparent`; `select option`
+  gets the same colours as a backstop for the open list. `color-scheme` was
+  already `light` on `:root` and `dark` in the dark block, and there is no
+  `data-theme` selector, so nothing changed there. All five selects (state,
+  metro area, highest degree, the calculator's select field, graduate
+  program) already use the shared field classes inside an opaque field shell.
+- **Prompt intent:** Native dropdowns must be readable in both themes, not a
+  blank white list.
+- **Bug — native select lists looked blank in dark mode:** The selects were
+  `bg-transparent`, and Chrome on Windows paints the open list from the
+  select's own background, so it fell back to white behind white dark-mode
+  text. **Fix:** the two rules above. In Chrome, dark-mode options now compute
+  to `rgb(26, 26, 25)` with white text. The popup itself is drawn by the OS
+  and was not captured in a screenshot.
+
 ## How I work with Claude Code
 
 1. **One bounded task at a time.** Each prompt names the files, the exact
