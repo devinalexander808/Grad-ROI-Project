@@ -11,7 +11,16 @@ import CumulativeChart from "../cumulative-chart";
 import NextMoves, { midSentence } from "../next-moves";
 import ProgramSearch, { ConfidenceBadge } from "../program-search";
 import type { Confidence } from "@/lib/scorecard";
-import { runModel, type ModelInputs } from "@/lib/model";
+import type { ModelInputs } from "@/lib/model";
+import {
+  PESSIMISTIC_GAP_MONTHS,
+  SCENARIOS,
+  applyStudyOptions,
+  cumulativeBand,
+  runScenarios,
+  type Scenario,
+  type StudyOptions,
+} from "@/lib/scenarios";
 import {
   formatDollars,
   formatPercent,
@@ -20,12 +29,15 @@ import {
 import {
   clearSelection,
   saveProgram,
+  saveStudy,
   selectedWage,
   useProfile,
   useProgram,
   useSelection,
+  useStudy,
   type ScorecardChoice,
   type Selection,
+  type Study,
 } from "@/lib/selection";
 
 /**
@@ -34,9 +46,11 @@ import {
  * §4 folds away under "Adjust assumptions", and the §5 outputs are on the
  * right, recomputed on every keystroke.
  *
- * v1 scope: manual inputs only — no Scorecard lookup, no accounts, no
- * scenarios. Rates are held in percent units here and converted to decimals
- * at the model boundary; the model itself never rounds.
+ * Build 4 adds the SPEC A2 scenarios (a pessimistic / base / optimistic toggle
+ * with a band on the chart), part-time study and employer reimbursement; all
+ * three are input transforms in `scenarios.ts`, so the model is unchanged.
+ * Rates are held in percent units here and converted to decimals at the model
+ * boundary; the model itself never rounds.
  */
 
 type Fields = {
@@ -59,6 +73,14 @@ type Fields = {
   B: string;
   r: string;
   N: string;
+  /** "full" or "part". */
+  studyMode: string;
+  /** Part-time program length; follows 2 × L until edited. */
+  L_part: string;
+  /** Pay kept while studying part-time; follows S0 until edited. */
+  PT_part: string;
+  /** Employer tuition reimbursement per school-year. */
+  R: string;
 };
 
 const DEFAULTS: Fields = {
@@ -81,7 +103,14 @@ const DEFAULTS: Fields = {
   B: "40000",
   r: "8",
   N: "10",
+  studyMode: "full",
+  L_part: "4",
+  PT_part: "60000",
+  R: "0",
 };
+
+/** Part-time programs usually take about twice as long. */
+const PART_TIME_STRETCH = 2;
 
 const CREDENTIALS = [
   "Master’s",
@@ -94,6 +123,16 @@ function num(value: string): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
 }
+
+/** A typed number for saving: null when the box is empty or not a number. */
+function numOrNull(value: string): number | null {
+  if (value.trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/** The calculator fields saved in the study store. */
+type StudyField = "studyMode" | "L_part" | "PT_part" | "R";
 
 function toModelInputs(f: Fields): ModelInputs {
   return {
@@ -116,11 +155,24 @@ function toModelInputs(f: Fields): ModelInputs {
   };
 }
 
+function toStudyOptions(f: Fields): StudyOptions {
+  return {
+    partTime: f.studyMode === "part",
+    partTimeLength: num(f.L_part),
+    payWhileStudying: num(f.PT_part),
+    reimbursementPerYear: num(f.R),
+  };
+}
+
 /** Input combinations the §5 formulas cannot express, caught before the model runs. */
-function problems(inputs: ModelInputs): string[] {
+function problems(inputs: ModelInputs, partTime: boolean): string[] {
   const found: string[] = [];
   if (!(inputs.L > 0)) {
-    found.push("Program length has to be more than 0 years.");
+    found.push(
+      partTime
+        ? "Part-time program length has to be more than 0 years."
+        : "Program length has to be more than 0 years.",
+    );
   }
   if (!(inputs.H >= 1)) {
     found.push("Horizon (under Adjust assumptions) has to be at least 1 year.");
@@ -188,6 +240,8 @@ export default function CalculatorPage() {
   const from = useSyncExternalStore(noSubscription, arrivedFrom, () => null);
   const profile = useProfile();
   const program = useProgram();
+  // How you'd study and pay, and the scenario, as saved last time (Build 4).
+  const savedStudy = useStudy();
 
   // The College Scorecard program in play: one picked on this page wins, else
   // the one picked on the Start screen when the user came from there.
@@ -212,6 +266,18 @@ export default function CalculatorPage() {
       if (program?.tuition != null) p.T = String(program.tuition);
       if (program?.years != null) p.L = String(program.years);
     }
+    if (savedStudy !== null) {
+      p.studyMode = savedStudy.studyMode;
+      if (savedStudy.partTimeLength !== null) {
+        p.L_part = String(savedStudy.partTimeLength);
+      }
+      if (savedStudy.payWhileStudying !== null) {
+        p.PT_part = String(savedStudy.payWhileStudying);
+      }
+      if (savedStudy.reimbursementPerYear !== null) {
+        p.R = String(savedStudy.reimbursementPerYear);
+      }
+    }
     // SPEC A3: Scorecard's first-year median is the default S1, ahead of the
     // BLS median (ladder level 4), and its typical debt the default B.
     if (scorecard !== undefined) {
@@ -232,11 +298,20 @@ export default function CalculatorPage() {
     pickedHere,
     scorecardS1,
     scorecardB,
+    savedStudy,
   ]);
   const fields = useMemo(() => {
     const out = { ...typed };
     for (const key of Object.keys(prefill) as (keyof Fields)[]) {
       if (!touched[key]) out[key] = prefill[key] as string;
+    }
+    // Part-time length and pay follow the full-time ones until edited here
+    // or saved from an earlier visit.
+    if (!touched.L_part && prefill.L_part === undefined) {
+      out.L_part = String(num(out.L) * PART_TIME_STRETCH);
+    }
+    if (!touched.PT_part && prefill.PT_part === undefined) {
+      out.PT_part = out.S0;
     }
     // When the Start screen supplies tuition and Scorecard has no typical debt,
     // the amount borrowed starts at SPEC Appendix A's default, max(T − Sch, 0),
@@ -335,16 +410,64 @@ export default function CalculatorPage() {
     });
   };
 
-  const inputs = useMemo(() => toModelInputs(fields), [fields]);
-  const issues = useMemo(() => problems(inputs), [inputs]);
-  const result = useMemo(
-    () => (issues.length === 0 ? runModel(inputs) : null),
-    [inputs, issues],
+  // A scenario picked here wins; else the saved one. Local state as well as
+  // the store, so the toggle still works where storage is blocked.
+  const [scenarioHere, setScenarioHere] = useState<Scenario | null>(null);
+  const scenario = scenarioHere ?? savedStudy?.scenario ?? "base";
+
+  /**
+   * The study store as it should be after a change. Part-time length and pay
+   * are saved only once edited, so until then they keep following the
+   * full-time length and the current salary.
+   */
+  const studyToSave = (next: Fields, nextScenario: Scenario, changed?: StudyField): Study => {
+    const edited = (key: "L_part" | "PT_part", saved: number | null) =>
+      key === changed || touched[key] === true || saved !== null;
+    return {
+      studyMode: next.studyMode === "part" ? "part" : "full",
+      partTimeLength: edited("L_part", savedStudy?.partTimeLength ?? null)
+        ? numOrNull(next.L_part)
+        : null,
+      payWhileStudying: edited("PT_part", savedStudy?.payWhileStudying ?? null)
+        ? numOrNull(next.PT_part)
+        : null,
+      reimbursementPerYear: numOrNull(next.R),
+      scenario: nextScenario,
+    };
+  };
+  const setStudy = (key: StudyField) => (value: string) => {
+    set(key)(value);
+    saveStudy(studyToSave({ ...fields, [key]: value }, scenario, key));
+  };
+  const setScenario = (next: Scenario) => {
+    setScenarioHere(next);
+    saveStudy(studyToSave(fields, next));
+  };
+  const partTime = fields.studyMode === "part";
+  // Full-time inputs, then part-time study and reimbursement, then the three
+  // scenarios on top.
+  const adjusted = useMemo(
+    () => applyStudyOptions(toModelInputs(fields), toStudyOptions(fields)),
+    [fields],
   );
+  const entered = adjusted.inputs;
+  const issues = useMemo(() => problems(entered, partTime), [entered, partTime]);
+  const scenarios = useMemo(
+    () => (issues.length === 0 ? runScenarios(entered) : null),
+    [entered, issues],
+  );
+  const band = useMemo(
+    () => (scenarios === null ? undefined : cumulativeBand(scenarios)),
+    [scenarios],
+  );
+  const result = scenarios?.[scenario].result ?? null;
+  const inputs = scenarios?.[scenario].inputs ?? entered;
 
   const horizon = inputs.H;
   const breakeven = result?.breakevenS1 ?? null;
   const breakevenGap = breakeven === null ? null : inputs.S1 - breakeven;
+  const salaryWord =
+    scenario === "base" ? "the salary you entered" : "this scenario’s salary";
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
@@ -497,6 +620,57 @@ export default function CalculatorPage() {
             />
           </Section>
 
+          <Section
+            title="How you’ll study and pay"
+            note="Part-time keeps a paycheck but takes longer. Employer help cuts what you pay."
+          >
+            <div className="sm:col-span-2">
+              <span className="block text-sm font-medium text-ink">Study</span>
+              <Toggle
+                label="Study"
+                value={fields.studyMode}
+                onChange={setStudy("studyMode")}
+                options={[
+                  { value: "full", label: "Full-time" },
+                  { value: "part", label: "Part-time" },
+                ]}
+              />
+              <span className="mt-1 block text-xs text-muted">
+                {partTime
+                  ? "You keep working while you study, and the program runs longer."
+                  : "You leave your job for the length of the program."}
+              </span>
+            </div>
+            {partTime && (
+              <>
+                <Field
+                  label="Part-time program length"
+                  hint={`Years. Starts at ${PART_TIME_STRETCH}× the full-time length.`}
+                  suffix="years"
+                  value={fields.L_part}
+                  onChange={setStudy("L_part")}
+                  step={0.5}
+                />
+                <Field
+                  label="Pay you keep while studying"
+                  hint="Pre-tax, per year. Starts at your current salary; held flat, with no raises, until you finish."
+                  prefix="$"
+                  value={fields.PT_part}
+                  onChange={setStudy("PT_part")}
+                  step={1000}
+                />
+              </>
+            )}
+            <Field
+              label="Tuition reimbursement"
+              hint="From your employer, per year while enrolled. Usually only if you stay in the job, so it pairs with part-time. Treated as tax-free; above $5,250 a year it usually isn’t."
+              prefix="$"
+              value={fields.R}
+              onChange={setStudy("R")}
+              step={250}
+            />
+          </Section>
+
           <details className="group rounded-xl border border-hairline bg-surface">
             <summary className="cursor-pointer list-none p-5 text-sm font-semibold text-ink">
               <span className="mr-1.5 inline-block text-muted transition-transform group-open:rotate-90">
@@ -572,7 +746,11 @@ export default function CalculatorPage() {
                 />
                 <Field
                   label="Part-time earnings while enrolled"
-                  hint="Pre-tax, per year, if you plan to keep working."
+                  hint={
+                    partTime
+                      ? "Not used while Part-time is on; set Pay you keep while studying instead."
+                      : "Pre-tax, per year, if you plan to keep working."
+                  }
                   prefix="$"
                   value={fields.PT}
                   onChange={set("PT")}
@@ -656,6 +834,24 @@ export default function CalculatorPage() {
           ) : (
             <>
               <Card>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h2 className="text-sm font-semibold text-ink">Scenario</h2>
+                  <Toggle
+                    label="Scenario"
+                    value={scenario}
+                    onChange={(next) => setScenario(next as Scenario)}
+                    options={SCENARIOS.map((s) => ({
+                      value: s,
+                      label: SCENARIO_LABEL[s],
+                    }))}
+                  />
+                </div>
+                <p className="mt-2 text-xs text-ink-secondary">
+                  {scenarioAssumptions(scenario, entered)}
+                </p>
+              </Card>
+
+              <Card>
                 <p className="text-lg leading-relaxed text-ink">
                   {breakeven === null ? (
                     <>
@@ -670,7 +866,10 @@ export default function CalculatorPage() {
                       <strong className="font-semibold text-accent">
                         {formatDollars(breakeven)}
                       </strong>{" "}
-                      to start. You entered {formatDollars(inputs.S1)}.
+                      to start.{" "}
+                      {scenario === "base"
+                        ? `You entered ${formatDollars(inputs.S1)}.`
+                        : `This scenario assumes ${formatDollars(inputs.S1)}.`}
                     </>
                   )}
                 </p>
@@ -692,7 +891,7 @@ export default function CalculatorPage() {
                   note={
                     result.paybackYear === null
                       ? `Cumulative cash never catches up within ${horizon} years.`
-                      : "First year the program pulls ahead in cumulative cash."
+                      : "First year the program pulls ahead in cumulative cash and stays ahead."
                   }
                 />
                 <Stat
@@ -711,10 +910,10 @@ export default function CalculatorPage() {
                       : breakevenGap >= 0
                         ? `${formatDollars(
                             breakevenGap,
-                          )} below the salary you entered.`
+                          )} below ${salaryWord}.`
                         : `${formatDollars(
                             -breakevenGap,
-                          )} above the salary you entered.`
+                          )} above ${salaryWord}.`
                   }
                 />
               </div>
@@ -729,12 +928,15 @@ export default function CalculatorPage() {
                 </h2>
                 <p className="mt-1 text-xs text-ink-secondary">
                   Program minus keeping your job, after tax, added up year by
-                  year. Above the zero line, the program is ahead.
+                  year. Above the zero line, the program is ahead. The line is
+                  the {SCENARIO_LABEL[scenario].toLowerCase()} scenario; the
+                  shaded band runs from pessimistic to optimistic.
                 </p>
                 <div className="mt-4">
                   <CumulativeChart
                     years={result.years}
                     paybackYear={result.paybackYear}
+                    band={band}
                   />
                 </div>
 
@@ -790,14 +992,43 @@ export default function CalculatorPage() {
                     the program ends, and run {fields.N} years.
                   </li>
                   <li>
-                    Out-of-pocket school cost of{" "}
-                    {formatDollars(result.schoolCostPerYear)} per school-year;
-                    borrowed money is excluded here because it comes back as the
-                    loan payment.
+                    {result.schoolCostPerYear >= 0 ? (
+                      <>
+                        Out-of-pocket school cost of{" "}
+                        {formatDollars(result.schoolCostPerYear)} per
+                        school-year
+                      </>
+                    ) : (
+                      <>
+                        Pay while studying more than covers school costs: you
+                        net {formatDollars(-result.schoolCostPerYear)} per
+                        school-year after tax
+                      </>
+                    )}
+                    ; borrowed money is excluded here because it comes back as
+                    the loan payment.
                   </li>
+                  {partTime && (
+                    <li>
+                      Part-time study over {formatYears(inputs.L)} years,
+                      keeping {formatDollars(inputs.PT)} a year in pay (before
+                      tax, no raises) until you finish.
+                    </li>
+                  )}
+                  {adjusted.reimbursementTotal > 0 && (
+                    <li>
+                      Your employer covers{" "}
+                      {formatDollars(adjusted.reimbursementTotal)} of tuition in
+                      all, counted like a scholarship.
+                      {adjusted.borrowingCappedAt !== null &&
+                        ` Borrowing is capped at the ${formatDollars(
+                          adjusted.borrowingCappedAt,
+                        )} left to pay.`}
+                    </li>
+                  )}
                   <li>
                     The new salary starts at{" "}
-                    {result.salaryStart.toFixed(2).replace(/\.00$/, "")} years
+                    {formatYears(result.salaryStart)} years
                     from today, and raises compound once a year.
                   </li>
                 </ul>
@@ -829,8 +1060,97 @@ export default function CalculatorPage() {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Scenarios                                                                   */
+/* -------------------------------------------------------------------------- */
+
+const SCENARIO_LABEL: Record<Scenario, string> = {
+  pessimistic: "Pessimistic",
+  base: "Base",
+  optimistic: "Optimistic",
+};
+
+/** "2", "0.83", "2.25": years without trailing zeros. */
+function formatYears(years: number): string {
+  return years.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function search(gapMonths: number): string {
+  return gapMonths === 0
+    ? "no job search"
+    : `a ${formatYears(gapMonths)}-month job search`;
+}
+
+/**
+ * The selected scenario in one plain sentence (SPEC A2), with the figures it
+ * actually uses, worked out from what was entered.
+ */
+function scenarioAssumptions(scenario: Scenario, entered: ModelInputs): string {
+  const raise = (rate: number) => formatPercent(rate * 100);
+  if (scenario === "base") {
+    return `Your numbers as entered: ${formatDollars(entered.S1)} to start, ${search(
+      entered.gap,
+    )}, and ${raise(entered.g_grad)} raises after the program.`;
+  }
+  const s1 = (factor: number) =>
+    entered.S0 + (entered.S1 - entered.S0) * factor;
+  if (scenario === "pessimistic") {
+    const gap = Math.max(entered.gap, PESSIMISTIC_GAP_MONTHS);
+    const g = Math.min(entered.g_grad, entered.g_work);
+    return `Things go worse: the raise over your current pay is half what you entered (${formatDollars(
+      Math.min(s1(0.5), s1(1.25)),
+    )} to start), ${search(gap)}, and raises after the program no better than your current ${raise(
+      g,
+    )}.`;
+  }
+  return `Things go better: the raise over your current pay is a quarter bigger (${formatDollars(
+    Math.max(s1(0.5), s1(1.25)),
+  )} to start), no job search, and ${raise(entered.g_grad)} raises after the program.`;
+}
+
+/* -------------------------------------------------------------------------- */
 /* Pieces                                                                      */
 /* -------------------------------------------------------------------------- */
+
+/** A row of buttons that picks one value, like a radio group. */
+function Toggle({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label={label}
+      className="mt-1 inline-flex rounded-md border border-hairline bg-plane p-0.5"
+    >
+      {options.map((option) => {
+        const on = option.value === value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            className={`rounded px-3 py-1 text-sm ${
+              on
+                ? "bg-accent font-medium text-white"
+                : "text-ink-secondary hover:text-ink"
+            }`}
+            onClick={() => onChange(option.value)}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function Card({ children }: { children: ReactNode }) {
   return (

@@ -1,6 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import { SCENARIOS, type Scenario } from "./scenarios";
 import type { Confidence, Figure } from "./scorecard";
 
 /**
@@ -12,6 +13,8 @@ import type { Confidence, Figure } from "./scorecard";
  * - `Profile`: where the user is now (Start screen step 1). Optional.
  * - `Program`: the program they're considering (Start screen step 3), and the
  *   College Scorecard program it was matched to, if any. Optional.
+ * - `Study`: how they'd study and pay (part-time, reimbursement) and the
+ *   scenario they last looked at, from the calculator (Build 4). Optional.
  *
  * Only medians travel in a selection: the state one always, and a metro one
  * when the user picked a metro and BLS published a figure for it. The
@@ -92,6 +95,18 @@ export interface Program {
   years: number | null;
   /** Set when the program was picked from College Scorecard. */
   scorecard?: ScorecardChoice;
+}
+
+/** Calculator: how you'd study and pay, and the scenario on screen. */
+export interface Study {
+  studyMode: "full" | "part";
+  /** Part-time program length in years; null follows 2 × the full-time length. */
+  partTimeLength: number | null;
+  /** Pre-tax pay per year kept while studying; null follows the current salary. */
+  payWhileStudying: number | null;
+  /** Employer tuition reimbursement per school-year; null means none entered. */
+  reimbursementPerYear: number | null;
+  scenario: Scenario;
 }
 
 export interface SelectedWage {
@@ -210,6 +225,17 @@ function isScorecardChoice(value: unknown): value is ScorecardChoice {
     isFigure(value.tuition) &&
     typeof value.source === "string" &&
     typeof value.asOf === "string"
+  );
+}
+
+function isStudy(value: unknown): value is Study {
+  if (!isRecord(value)) return false;
+  return (
+    (value.studyMode === "full" || value.studyMode === "part") &&
+    isNumberOrNull(value.partTimeLength) &&
+    isNumberOrNull(value.payWhileStudying) &&
+    isNumberOrNull(value.reimbursementPerYear) &&
+    SCENARIOS.includes(value.scenario as Scenario)
   );
 }
 
@@ -332,6 +358,7 @@ export function useHydrated(): boolean {
 const selectionStore = createStore("pathfinder.selection", isSelection);
 const profileStore = createStore("pathfinder.profile", isProfile);
 const programStore = createStore("pathfinder.program", isProgram);
+const studyStore = createStore("pathfinder.study", isStudy);
 
 export const saveSelection = selectionStore.save;
 export const clearSelection = selectionStore.clear;
@@ -343,6 +370,8 @@ export const readProfile = profileStore.get;
 
 export const saveProgram = programStore.save;
 export const readProgram = programStore.get;
+
+export const saveStudy = studyStore.save;
 
 /** The saved selection, or null. Null on the server and during hydration. */
 export function useSelection(): Selection | null {
@@ -367,6 +396,15 @@ export function useProgram(): Program | null {
   return useSyncExternalStore(
     programStore.subscribe,
     programStore.get,
+    getServerSnapshot,
+  );
+}
+
+/** The saved calculator study options, or null. Null on the server and during hydration. */
+export function useStudy(): Study | null {
+  return useSyncExternalStore(
+    studyStore.subscribe,
+    studyStore.get,
     getServerSnapshot,
   );
 }

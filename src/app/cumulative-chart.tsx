@@ -1,9 +1,10 @@
 "use client";
 
 import {
+  Area,
   CartesianGrid,
+  ComposedChart,
   Line,
-  LineChart,
   ReferenceDot,
   ReferenceLine,
   ResponsiveContainer,
@@ -12,21 +13,30 @@ import {
   YAxis,
 } from "recharts";
 import type { YearRow } from "@/lib/model";
+import type { BandPoint } from "@/lib/scenarios";
 import { formatCompactDollars, formatDollars } from "@/lib/format";
 
 interface Props {
+  /** The selected scenario's years; its line is drawn solid. */
   years: YearRow[];
   /** First year cumulative cash turns non-negative, or null. */
   paybackYear: number | null;
+  /** Pessimistic-to-optimistic range, shaded behind the line. */
+  band?: BandPoint[];
 }
 
 /**
  * Cumulative after-tax cash difference (program − keep working), year by year.
- * One series, so no legend: the heading names it. The crossover — the year the
- * line reaches zero — is marked with a dot and called out on the axis.
+ * The selected scenario is the line; the shaded band runs from the pessimistic
+ * to the optimistic scenario, so the spread of outcomes shows at a glance. The
+ * crossover — the year the line reaches zero — is marked with a dot.
  */
-export default function CumulativeChart({ years, paybackYear }: Props) {
-  const data = years.map((y) => ({ year: y.k, cumDiff: y.cumDiff }));
+export default function CumulativeChart({ years, paybackYear, band }: Props) {
+  const data = years.map((y, i) => ({
+    year: y.k,
+    cumDiff: y.cumDiff,
+    range: band?.[i] ? [band[i].low, band[i].high] : undefined,
+  }));
   const crossover =
     paybackYear === null
       ? null
@@ -35,7 +45,7 @@ export default function CumulativeChart({ years, paybackYear }: Props) {
   return (
     <div className="h-64 w-full sm:h-72">
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart
+        <ComposedChart
           data={data}
           margin={{ top: 16, right: 16, bottom: 4, left: 4 }}
         >
@@ -55,12 +65,28 @@ export default function CumulativeChart({ years, paybackYear }: Props) {
             width={64}
           />
           <ReferenceLine y={0} stroke="var(--muted)" />
+          {band && (
+            <Area
+              type="linear"
+              dataKey="range"
+              name="Pessimistic to optimistic"
+              fill="var(--accent)"
+              fillOpacity={0.15}
+              stroke="none"
+              activeDot={false}
+              isAnimationActive={false}
+            />
+          )}
           <Tooltip
             cursor={{ stroke: "var(--muted)" }}
-            formatter={(value) => [
-              formatDollars(Number(value)),
-              "Cumulative difference",
-            ]}
+            formatter={(value, name) =>
+              Array.isArray(value)
+                ? [
+                    `${formatDollars(Number(value[0]))} to ${formatDollars(Number(value[1]))}`,
+                    name,
+                  ]
+                : [formatDollars(Number(value)), "Cumulative difference"]
+            }
             labelFormatter={(label) => `Year ${label}`}
             contentStyle={{
               background: "var(--surface)",
@@ -113,7 +139,7 @@ export default function CumulativeChart({ years, paybackYear }: Props) {
               }}
             />
           )}
-        </LineChart>
+        </ComposedChart>
       </ResponsiveContainer>
     </div>
   );

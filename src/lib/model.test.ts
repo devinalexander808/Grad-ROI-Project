@@ -112,3 +112,33 @@ describe('runModel against the hand-worked spreadsheet cases', () => {
     });
   }
 });
+
+describe('payback: cumulative cash reaches zero and stays there', () => {
+  // The part-time case seen in the calculator (also in the workbook's
+  // Build4_StudyScenarios sheet): four years part-time keeping the full
+  // $60,000, the $40,000 tuition all borrowed.
+  //   C_sch = (40,000 − 0 − 40,000) / 4 − 60,000 · 0.75 = −45,000
+  //   Year 1: CF_B = 45,000, CF_A = 60,000 · 0.75 = 45,000 → Diff 0, CumDiff 0
+  //   Year 2: CF_A = 60,000 · 1.03 · 0.75 = 46,350 → Diff −1,350
+  //   Year 3: CF_A = 60,000 · 1.03² · 0.75 = 47,740.50 → CumDiff −4,090.50
+  // CumDiff touches 0 in year 1, so the old rule ("first k with CumDiff ≥ 0")
+  // said year 1. It stays at or above 0 only from year 7.
+  const inputs: ModelInputs = {
+    S0: 60000, g_work: 0.03, t: 0.25, d: 0.05, H: 10,
+    L: 4, T: 40000, Sch: 0, PT: 60000, Living: 0,
+    gap: 3, S1: 85000, g_grad: 0.04,
+    B: 40000, r: 0.08, N: 10,
+  };
+
+  it('does not count a year-1 touch of zero', () => {
+    const out = runModel(inputs);
+    expectDollars(out.years[0].cumDiff, 0);
+    expectDollars(out.years[1].cumDiff, -1350);
+    expectDollars(out.years[2].cumDiff, -4090.5);
+    expect(out.paybackYear).not.toBe(1);
+    expect(out.paybackYear).toBe(7);
+    for (const y of out.years.slice(6)) {
+      expect(y.cumDiff).toBeGreaterThanOrEqual(0);
+    }
+  });
+});

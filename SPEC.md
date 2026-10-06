@@ -153,7 +153,7 @@ All sources are U.S. federal or free-tier commercial; none require scraping.
     NPV          = Σ_{k=1..H} Diff(k) / (1 + d)^k
 
 **Outputs shown to the user**
-- Payback year: the first `k` where `CumDiff(k) ≥ 0`, or "not within H years"
+- Payback year: the first `k` such that `CumDiff(j) ≥ 0` for every `j` from `k` through `H` (cumulative cash reaches zero and stays there), or "not within H years". "First `k` where `CumDiff(k) ≥ 0`" is not enough: part-time study can make year 1's difference exactly zero (full pay kept, tuition borrowed), after which cumulative cash goes negative.
 - NPV over the horizon (positive means the program is worth more than working, in today's dollars)
 - Breakeven starting salary `S1*`: the value of `S1` that makes `NPV = 0`. NPV is linear in S1, so it has a closed form: with `m(k) = (1 + g_grad)^exp(k) · (1 − t) · wf(k) / (1 + d)^k` for k ≤ H, `S1* = (S1 · Σm − NPV) / Σm` (undefined if Σm = 0, i.e. no working years inside the horizon). Headline sentence: "This program pays off within H years if you earn at least $S1* to start. Graduates of this program typically start at $S1 (Scorecard median)."
 - Ten-year cumulative cash chart, both paths, with the crossover marked

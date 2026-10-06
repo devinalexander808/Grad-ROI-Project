@@ -274,6 +274,42 @@ One entry per commit, oldest first. Built with Claude Code; deployed on Vercel.
   to `rgb(26, 26, 25)` with white text. The popup itself is drawn by the OS
   and was not captured in a screenshot.
 
+## 2026-10-05 — Add scenarios band, part-time study, tuition reimbursement; fix payback rule
+
+- **Built:** PLAN Build 4. New `src/lib/scenarios.ts` holds pure transforms on
+  the model's own inputs: part-time study sets `L` and `PT`, and employer
+  reimbursement of R a year adds R · L to `Sch`. Reimbursement is capped at
+  tuition after scholarships, and borrowing at what is left to pay. The three
+  SPEC A2 scenarios are a pessimistic / base / optimistic toggle on the
+  calculator, each explained in one plain sentence with its figures, and the
+  cumulative-cash chart shades a band from pessimistic to optimistic behind
+  the selected line. A new "How you'll study and pay" card holds the
+  part-time switch, part-time length (starts at 2× full-time), pay kept
+  (starts at your salary) and tuition reimbursement. Study mode, those
+  fields and the scenario are saved in a new `pathfinder.study` store and
+  survive a reload. The payback rule changed in `model.ts`, SPEC A2 and the
+  workbook: the first year cumulative cash reaches zero *and stays there*.
+  All five workbook cases are unchanged (4 / none / none / 6 / none). The
+  workbook gains a `Build4_StudyScenarios` sheet with the 12 scenario cases
+  and the payback case, recalculated in Excel. 13 new tests (12 in
+  `scenarios.test.ts`, 1 in `model.test.ts`). No new dependencies.
+- **Prompt intent:** Show a range, not a single guess, and cover the common
+  real case of studying part-time on an employer's dime, without bending the
+  frozen model.
+- **Bug — "Pays off in year 1" for part-time study:** With full pay kept and
+  the tuition borrowed, year 1's difference was exactly 0. The old rule
+  ("first k with CumDiff ≥ 0") called that payback, though cumulative cash
+  went negative from year 2. Caught in the browser. **Fix:** payback is now
+  the start of the final run of years with CumDiff ≥ 0. That case now pays
+  back in year 7, with a test.
+- **Bug — scenarios could cross:** Read literally, A2 makes pessimistic
+  *better* than base for a pay cut (halving a cut) or a job search over 9
+  months. **Fix:** each scenario takes the worse (or better) of its rule and
+  the entered value.
+- **Bug — negative school cost on screen:** "What this assumes" read
+  "Out-of-pocket school cost of −$45,000" when pay while studying covers
+  the cost. **Fix:** it now says you net that amount per school-year.
+
 ## How I work with Claude Code
 
 1. **One bounded task at a time.** Each prompt names the files, the exact

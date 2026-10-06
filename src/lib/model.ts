@@ -82,7 +82,10 @@ export interface ModelResult {
   npv: number;
   /** Σ m(k): the NPV's sensitivity to S1. */
   sumM: number;
-  /** First k with CumDiff(k) ≥ 0, or null if that never happens within H. */
+  /**
+   * First k with CumDiff(j) ≥ 0 for every j from k through H: cumulative cash
+   * reaches zero and stays there. Null if that never happens within H.
+   */
   paybackYear: number | null;
   /** S1* making NPV = 0; null when Σm = 0 (no working years in the horizon). */
   breakevenS1: number | null;
@@ -112,7 +115,6 @@ export function runModel(inputs: ModelInputs): ModelResult {
   let cumDiff = 0;
   let npv = 0;
   let sumM = 0;
-  let paybackYear: number | null = null;
 
   for (let k = 1; k <= H; k++) {
     const schoolFraction = clamp(L - (k - 1), 0, 1);
@@ -144,10 +146,6 @@ export function runModel(inputs: ModelInputs): ModelResult {
     npv += pvDiff;
     sumM += m;
 
-    if (paybackYear === null && cumDiff >= 0) {
-      paybackYear = k;
-    }
-
     years.push({
       k,
       schoolFraction,
@@ -162,6 +160,14 @@ export function runModel(inputs: ModelInputs): ModelResult {
       pvDiff,
       m,
     });
+  }
+
+  // Payback is the start of the final run of years with CumDiff ≥ 0. Touching
+  // zero and dipping back below does not count: part-time study can make year
+  // 1's difference exactly zero before the costs arrive.
+  let paybackYear: number | null = null;
+  for (let i = years.length - 1; i >= 0 && years[i].cumDiff >= 0; i--) {
+    paybackYear = years[i].k;
   }
 
   // NPV is linear in S1, so the breakeven salary has a closed form.
