@@ -35,6 +35,17 @@ export interface Selection {
   metroName?: string;
   /** BLS OEWS median annual wage for the occupation in that metro. */
   metroMedian?: number;
+  /**
+   * Set together with `onetTitle` when the job was picked from O*NET search,
+   * e.g. "29-1141.03". `soc` and `title` above are still what BLS publishes.
+   */
+  onetCode?: string;
+  onetTitle?: string;
+  /**
+   * Only for O*NET-only breakdowns (a code not ending in ".00"): the six-digit
+   * group BLS publishes wages for. `title` is null if O*NET could not name it.
+   */
+  broaderGroup?: { soc: string; title: string | null };
 }
 
 export const DEGREES = [
@@ -135,14 +146,32 @@ function isSelection(value: unknown): value is Selection {
     (typeof v.metroCode === "string" &&
       typeof v.metroName === "string" &&
       isFiniteNumber(v.metroMedian));
+  const onetOk =
+    (v.onetCode === undefined &&
+      v.onetTitle === undefined &&
+      v.broaderGroup === undefined) ||
+    (typeof v.onetCode === "string" &&
+      typeof v.onetTitle === "string" &&
+      (v.broaderGroup === undefined || isBroaderGroup(v.broaderGroup)));
   return (
     metroOk &&
+    onetOk &&
     typeof v.soc === "string" &&
     typeof v.title === "string" &&
     typeof v.stateFips === "string" &&
     typeof v.stateName === "string" &&
     isFiniteNumber(v.stateMedian) &&
     (v.year === null || typeof v.year === "number")
+  );
+}
+
+function isBroaderGroup(
+  value: unknown,
+): value is NonNullable<Selection["broaderGroup"]> {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.soc === "string" &&
+    (value.title === null || typeof value.title === "string")
   );
 }
 
@@ -280,6 +309,24 @@ function createStore<T>(
 
 function getServerSnapshot(): null {
   return null;
+}
+
+/** Nothing to subscribe to: this only tells server render from client render. */
+function noSubscription(): () => void {
+  return () => {};
+}
+
+/**
+ * False on the server and during hydration, true after. Pages that start from
+ * what was saved, which only the browser knows, mount once this is true rather
+ * than flashing defaults.
+ */
+export function useHydrated(): boolean {
+  return useSyncExternalStore(
+    noSubscription,
+    () => true,
+    () => false,
+  );
 }
 
 const selectionStore = createStore("pathfinder.selection", isSelection);

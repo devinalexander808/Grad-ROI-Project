@@ -28,6 +28,21 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="min-h-full flex flex-col">
         <Nav />
         {children}
+        <footer className="mt-auto border-t border-hairline bg-surface">
+          <p className="mx-auto w-full max-w-6xl px-4 py-4 text-xs text-muted sm:px-6 lg:px-8">
+            This site incorporates information from{" "}
+            <a
+              href="https://services.onetcenter.org/"
+              className="underline hover:text-ink"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              O*NET Web Services
+            </a>{" "}
+            by the U.S. Department of Labor, Employment and Training
+            Administration (USDOL/ETA). O*NET® is a trademark of USDOL/ETA.
+          </p>
+        </footer>
       </body>
     </html>
   );

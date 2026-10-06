@@ -1,16 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type {
   AreaFigures,
   Observation,
   OccupationApiPayload,
 } from "@/lib/bls";
-import { OCCUPATIONS } from "@/lib/occupations";
+import { findOccupation } from "@/lib/occupations";
+import { useHydrated } from "@/lib/selection";
 import { formatCount, formatDollars } from "@/lib/format";
 import OccupationPicker, {
-  DEFAULT_CHOICE,
+  initialChoice,
   useOccupationLookup,
   withHyphen,
   type JobChoice,
@@ -27,14 +28,28 @@ import OccupationPicker, {
  */
 
 export default function JobPage() {
-  const [choice, setChoice] = useState<JobChoice>(DEFAULT_CHOICE);
+  // The page starts from the job saved last time, which only the browser
+  // knows, so it mounts after hydration rather than flashing the default.
+  const hydrated = useHydrated();
+  return hydrated ? (
+    <JobView />
+  ) : (
+    <div className="mx-auto w-full max-w-4xl px-4 py-10 sm:px-6 lg:px-8">
+      <p className="text-sm text-ink-secondary">Loading…</p>
+    </div>
+  );
+}
+
+function JobView() {
+  const [choice, setChoice] = useState<JobChoice>(initialChoice);
   // Asks BLS and saves the choice for the calculator.
   const load = useOccupationLookup(choice);
 
-  const selected = useMemo(
-    () => OCCUPATIONS.find((o) => o.soc === choice.soc) ?? null,
-    [choice.soc],
-  );
+  // Seed jobs describe themselves; anything picked from O*NET gets its
+  // description from the lookup, once it answers.
+  const selected =
+    findOccupation(choice.soc) ??
+    (load.state === "ready" ? load.data.occupation : null);
 
   return (
     <div className="mx-auto w-full max-w-4xl px-4 py-10 sm:px-6 lg:px-8">
@@ -54,7 +69,12 @@ export default function JobPage() {
       {selected && (
         <p className="mt-4 text-sm text-ink-secondary">
           {selected.description}{" "}
-          <span className="text-muted">SOC {withHyphen(selected.soc)}</span>
+          <span className="text-muted">
+            SOC {withHyphen(selected.soc)}
+            {selected.descriptionSource
+              ? ` · Description: ${selected.descriptionSource}`
+              : ""}
+          </span>
         </p>
       )}
 

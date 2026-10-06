@@ -211,6 +211,50 @@ One entry per commit, oldest first. Built with Claude Code; deployed on Vercel.
 
 ---
 
+## 2026-10-05 — Add O*NET job search, 48 verified metros, dropdown fix, and O*NET credit
+
+- **Built:** PLAN Build 2. `src/lib/onet.ts` is a server-side O*NET Web
+  Services v2 client modelled on `bls.ts` (8s timeout, key redacted, 24-hour
+  in-process cache). `/api/occupations/search?q=` maps a typed title to
+  O*NET-SOC codes; "29-1141.03" becomes BLS SOC "291141", and O*NET-only
+  codes (not ".00") are labelled "BLS publishes wages for the broader group
+  <title>". The picker shows the seed jobs instantly with "More jobs from
+  O*NET" below; no match says "We couldn't find that job". Jobs outside the
+  seed table take their title and description from O*NET on the Job page.
+  The seed table grew from 20 to 59 jobs, each checked against BLS with the
+  new `scripts/verify-occupations.ts`. The dropdown now has an opaque
+  surface, border, shadow, z-30, its own 280px scroll, one highlighted row for
+  mouse and arrow keys, and Enter to select. 48 metros added for TX, FL, NY,
+  IL, PA, OH, GA, NC, MI and NJ (NY, Philadelphia and Allentown also list
+  under NJ), all verified with `scripts/verify-metros.ts`; California
+  unchanged. The O*NET pick is saved in the selection (`onetCode`,
+  `onetTitle`, `broaderGroup`) and restored on the Start screen and the Job
+  page, which now opens on the saved job. O*NET credit added to the site
+  footer. 9 new tests in `onet.test.ts`. No new dependencies.
+- **Prompt intent:** Any job title should work, not just a seed list, and
+  local pay should exist for the biggest states, with every code checked
+  against BLS before it ships.
+- **Bug — dropdown opened far below the input:** In the two-column grid the
+  picker cell stretched to the taller state/metro column, and the list was
+  anchored to the bottom of that cell, about 70px below the input, so you had
+  to scroll to find it. Caught in the browser. **Fix:** the cell is
+  `self-start` and the list hangs off the input itself.
+- **Bug — Cleveland metro returned no data:** 17460 (Cleveland–Elyria) has no
+  2025 OEWS series. **Fix:** OMB's 2023 delineation re-coded it as 17410,
+  which verified.
+- **Bug — O*NET pick lost on reload:** Only the SOC was saved, so "Critical
+  Care Nurses" came back as Registered Nurses without its broader-group note;
+  and switching between two O*NET jobs with the same SOC made no new BLS
+  request, so the new pick was never saved. **Fix:** the O*NET fields are
+  stored in the selection, and saving runs in its own effect keyed on the
+  pick as well as the BLS answer.
+- **Not added:** Purchasing agent (131023) has no BLS series; OEWS publishes
+  it only inside 131020, which was not checked.
+- **Verified:** In Chrome, "nurse", "electrician" and "systems architect"
+  return O*NET matches; Electricians in Dallas loads BLS figures; Critical
+  Care Nurses survives a reload on both pages; the dropdown is readable with
+  the light and dark theme colours.
+
 ## How I work with Claude Code
 
 1. **One bounded task at a time.** Each prompt names the files, the exact

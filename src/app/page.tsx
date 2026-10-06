@@ -1,22 +1,22 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useSyncExternalStore, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { formatDollars } from "@/lib/format";
 import {
   DEGREES,
   readProfile,
   readProgram,
-  readSelection,
   saveProfile,
   saveProgram,
+  useHydrated,
   type Degree,
   type Profile,
   type Program,
   type ScorecardChoice,
 } from "@/lib/selection";
 import OccupationPicker, {
-  DEFAULT_CHOICE,
+  initialChoice,
   useOccupationLookup,
   type JobChoice,
   type Load,
@@ -31,19 +31,10 @@ import ProgramSearch from "./program-search";
 
 const MAX_EXPERIENCE = 40;
 
-/** Nothing to subscribe to: this only tells server render from client render. */
-function noSubscription(): () => void {
-  return () => {};
-}
-
 export default function StartPage() {
   // The form starts from what was saved last time, which only the browser
   // knows, so it mounts after hydration rather than flashing defaults.
-  const hydrated = useSyncExternalStore(
-    noSubscription,
-    () => true,
-    () => false,
-  );
+  const hydrated = useHydrated();
 
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-10 sm:px-6 lg:px-8">
@@ -83,16 +74,7 @@ function StartForm() {
   const [scorecard, setScorecard] = useState<ScorecardChoice | undefined>(
     () => readProgram()?.scorecard,
   );
-  const [choice, setChoice] = useState<JobChoice>(() => {
-    const saved = readSelection();
-    return saved === null
-      ? DEFAULT_CHOICE
-      : {
-          soc: saved.soc,
-          stateFips: saved.stateFips,
-          metroCode: saved.metroCode ?? null,
-        };
-  });
+  const [choice, setChoice] = useState<JobChoice>(initialChoice);
   // Asks BLS and saves the choice for the calculator, as the Job page does.
   const load = useOccupationLookup(choice);
 

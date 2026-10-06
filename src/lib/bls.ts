@@ -489,19 +489,67 @@ export function stateName(fips: string): string | null {
 /**
  * Metros the Job page offers, each with the state it belongs to so the picker
  * can filter by state. Only codes verified against the live API go here: each
- * returned a 2025 median for SOC 13-2051 (scripts/verify-metros.ts, Sept 28,
- * 2026). BLS's data API does not return area names, so names are the Census
- * CBSA titles, checked against the BLS CBSA code list. Sorted by name.
+ * returned a 2025 median for SOC 13-2051 (scripts/verify-metros.ts; California
+ * Sept 28, 2026, the other ten states Oct 5, 2026). Names are the Census 2023
+ * CBSA titles, which match the names the BLS catalog returned where it returned
+ * any. Covers the ten largest states plus New Jersey, 3–5 metros each; a metro
+ * that crosses state lines lists its other states in `alsoIn`. Sorted by name.
  */
-export const METROS: { code: string; name: string; stateFips: string }[] = [
+export const METROS: {
+  code: string;
+  name: string;
+  stateFips: string;
+  /** Other states the metro reaches into, so it is offered there too. */
+  alsoIn?: string[];
+}[] = [
+  { code: "0010420", name: "Akron, OH", stateFips: "39" },
+  { code: "0010580", name: "Albany–Schenectady–Troy, NY", stateFips: "36" },
+  { code: "0010900", name: "Allentown–Bethlehem–Easton, PA-NJ", stateFips: "42", alsoIn: ["34"] },
+  { code: "0011460", name: "Ann Arbor, MI", stateFips: "26" },
+  { code: "0012060", name: "Atlanta–Sandy Springs–Roswell, GA", stateFips: "13" },
+  { code: "0012100", name: "Atlantic City–Hammonton, NJ", stateFips: "34" },
+  { code: "0012260", name: "Augusta–Richmond County, GA-SC", stateFips: "13" },
+  { code: "0012420", name: "Austin–Round Rock–San Marcos, TX", stateFips: "48" },
   { code: "0012540", name: "Bakersfield–Delano, CA", stateFips: "06" },
+  { code: "0015380", name: "Buffalo–Cheektowaga, NY", stateFips: "36" },
+  { code: "0016580", name: "Champaign–Urbana, IL", stateFips: "17" },
+  { code: "0016740", name: "Charlotte–Concord–Gastonia, NC-SC", stateFips: "37" },
+  { code: "0016980", name: "Chicago–Naperville–Elgin, IL-IN", stateFips: "17" },
+  { code: "0017140", name: "Cincinnati, OH-KY-IN", stateFips: "39" },
+  { code: "0017410", name: "Cleveland, OH", stateFips: "39" },
+  { code: "0017980", name: "Columbus, GA-AL", stateFips: "13" },
+  { code: "0018140", name: "Columbus, OH", stateFips: "39" },
+  { code: "0019100", name: "Dallas–Fort Worth–Arlington, TX", stateFips: "48" },
+  { code: "0019430", name: "Dayton–Kettering–Beavercreek, OH", stateFips: "39" },
+  { code: "0019820", name: "Detroit–Warren–Dearborn, MI", stateFips: "26" },
+  { code: "0020500", name: "Durham–Chapel Hill, NC", stateFips: "37" },
+  { code: "0021340", name: "El Paso, TX", stateFips: "48" },
+  { code: "0022420", name: "Flint, MI", stateFips: "26" },
   { code: "0023420", name: "Fresno, CA", stateFips: "06" },
+  { code: "0024340", name: "Grand Rapids–Wyoming–Kentwood, MI", stateFips: "26" },
+  { code: "0024660", name: "Greensboro–High Point, NC", stateFips: "37" },
+  { code: "0025420", name: "Harrisburg–Carlisle, PA", stateFips: "42" },
+  { code: "0026420", name: "Houston–Pasadena–The Woodlands, TX", stateFips: "48" },
+  { code: "0027260", name: "Jacksonville, FL", stateFips: "12" },
+  { code: "0029620", name: "Lansing–East Lansing, MI", stateFips: "26" },
   { code: "0031080", name: "Los Angeles–Long Beach–Anaheim, CA", stateFips: "06" },
+  { code: "0031420", name: "Macon–Bibb County, GA", stateFips: "13" },
+  { code: "0033100", name: "Miami–Fort Lauderdale–West Palm Beach, FL", stateFips: "12" },
   { code: "0033700", name: "Modesto, CA", stateFips: "06" },
+  { code: "0035620", name: "New York–Newark–Jersey City, NY-NJ", stateFips: "36", alsoIn: ["34"] },
+  { code: "0035840", name: "North Port–Bradenton–Sarasota, FL", stateFips: "12" },
+  { code: "0036740", name: "Orlando–Kissimmee–Sanford, FL", stateFips: "12" },
   { code: "0037100", name: "Oxnard–Thousand Oaks–Ventura, CA", stateFips: "06" },
+  { code: "0037900", name: "Peoria, IL", stateFips: "17" },
+  { code: "0037980", name: "Philadelphia–Camden–Wilmington, PA-NJ-DE-MD", stateFips: "42", alsoIn: ["34"] },
+  { code: "0038300", name: "Pittsburgh, PA", stateFips: "42" },
+  { code: "0039580", name: "Raleigh–Cary, NC", stateFips: "37" },
   { code: "0040140", name: "Riverside–San Bernardino–Ontario, CA", stateFips: "06" },
+  { code: "0040380", name: "Rochester, NY", stateFips: "36" },
+  { code: "0040420", name: "Rockford, IL", stateFips: "17" },
   { code: "0040900", name: "Sacramento–Roseville–Folsom, CA", stateFips: "06" },
   { code: "0041500", name: "Salinas, CA", stateFips: "06" },
+  { code: "0041700", name: "San Antonio–New Braunfels, TX", stateFips: "48" },
   { code: "0041740", name: "San Diego–Chula Vista–Carlsbad, CA", stateFips: "06" },
   { code: "0041860", name: "San Francisco–Oakland–Fremont, CA", stateFips: "06" },
   { code: "0041940", name: "San Jose–Sunnyvale–Santa Clara, CA", stateFips: "06" },
@@ -509,11 +557,21 @@ export const METROS: { code: string; name: string; stateFips: string }[] = [
   { code: "0042100", name: "Santa Cruz–Watsonville, CA", stateFips: "06" },
   { code: "0042200", name: "Santa Maria–Santa Barbara, CA", stateFips: "06" },
   { code: "0042220", name: "Santa Rosa–Petaluma, CA", stateFips: "06" },
+  { code: "0042340", name: "Savannah, GA", stateFips: "13" },
+  { code: "0042540", name: "Scranton–Wilkes-Barre, PA", stateFips: "42" },
+  { code: "0044100", name: "Springfield, IL", stateFips: "17" },
   { code: "0044700", name: "Stockton–Lodi, CA", stateFips: "06" },
+  { code: "0045060", name: "Syracuse, NY", stateFips: "36" },
+  { code: "0045300", name: "Tampa–St. Petersburg–Clearwater, FL", stateFips: "12" },
+  { code: "0045940", name: "Trenton–Princeton, NJ", stateFips: "34" },
+  { code: "0047220", name: "Vineland, NJ", stateFips: "34" },
+  { code: "0049180", name: "Winston-Salem, NC", stateFips: "37" },
 ];
 
 export function metrosInState(fips: string): { code: string; name: string }[] {
-  return METROS.filter((m) => m.stateFips === fips);
+  return METROS.filter(
+    (m) => m.stateFips === fips || m.alsoIn?.includes(fips),
+  ).map(({ code, name }) => ({ code, name }));
 }
 
 export function metroName(code: string): string | null {

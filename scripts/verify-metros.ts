@@ -1,6 +1,7 @@
 /**
- * One-off check: which California metro area codes does BLS OEWS actually
- * publish? Not part of the app or the build.
+ * One-off check: which metro area codes does BLS OEWS actually publish? Not
+ * part of the app or the build. Covers California plus the next nine largest
+ * states and New Jersey (PLAN.md Build 2).
  *
  *   npx tsx scripts/verify-metros.ts
  *
@@ -19,8 +20,17 @@ import {
 
 const SOC = "132051";
 
-/** Census CBSA codes padded to 7 digits, with the Census name as a fallback label. */
-const CANDIDATES: { code: string; censusName: string }[] = [
+/**
+ * Census CBSA codes padded to 7 digits, with the Census name as a fallback
+ * label. `stateFips` is the state the metro is listed under; `alsoIn` lists
+ * other states it reaches into (New York and Philadelphia cover much of NJ).
+ */
+const CANDIDATES: {
+  code: string;
+  censusName: string;
+  stateFips?: string;
+  alsoIn?: string[];
+}[] = [
   { code: "0031080", censusName: "Los Angeles–Long Beach–Anaheim, CA" },
   { code: "0041860", censusName: "San Francisco–Oakland–Fremont, CA" },
   { code: "0041940", censusName: "San Jose–Sunnyvale–Santa Clara, CA" },
@@ -38,7 +48,67 @@ const CANDIDATES: { code: string; censusName: string }[] = [
   // METROS used to label 0042200 as San Luis Obispo. Confirmed against the
   // BLS CBSA code list: 42200 is Santa Maria–Santa Barbara, 42020 is SLO.
   { code: "0042200", censusName: "Santa Maria–Santa Barbara, CA" },
-  { code: "0042020", censusName: "San Luis Obispo–Paso Robles, CA" },
+  { code: "0042020", censusName: "San Luis Obispo–Paso Robles, CA" },  // Texas (48)
+  { code: "0019100", censusName: "Dallas–Fort Worth–Arlington, TX", stateFips: "48" },
+  { code: "0026420", censusName: "Houston–Pasadena–The Woodlands, TX", stateFips: "48" },
+  { code: "0041700", censusName: "San Antonio–New Braunfels, TX", stateFips: "48" },
+  { code: "0012420", censusName: "Austin–Round Rock–San Marcos, TX", stateFips: "48" },
+  { code: "0021340", censusName: "El Paso, TX", stateFips: "48" },
+  // Florida (12)
+  { code: "0033100", censusName: "Miami–Fort Lauderdale–West Palm Beach, FL", stateFips: "12" },
+  { code: "0045300", censusName: "Tampa–St. Petersburg–Clearwater, FL", stateFips: "12" },
+  { code: "0036740", censusName: "Orlando–Kissimmee–Sanford, FL", stateFips: "12" },
+  { code: "0027260", censusName: "Jacksonville, FL", stateFips: "12" },
+  { code: "0035840", censusName: "North Port–Bradenton–Sarasota, FL", stateFips: "12" },
+  // New York (36)
+  { code: "0035620", censusName: "New York–Newark–Jersey City, NY-NJ", stateFips: "36", alsoIn: ["34"] },
+  { code: "0015380", censusName: "Buffalo–Cheektowaga, NY", stateFips: "36" },
+  { code: "0040380", censusName: "Rochester, NY", stateFips: "36" },
+  { code: "0010580", censusName: "Albany–Schenectady–Troy, NY", stateFips: "36" },
+  { code: "0045060", censusName: "Syracuse, NY", stateFips: "36" },
+  // Illinois (17)
+  { code: "0016980", censusName: "Chicago–Naperville–Elgin, IL-IN", stateFips: "17" },
+  { code: "0040420", censusName: "Rockford, IL", stateFips: "17" },
+  { code: "0037900", censusName: "Peoria, IL", stateFips: "17" },
+  { code: "0016580", censusName: "Champaign–Urbana, IL", stateFips: "17" },
+  { code: "0044100", censusName: "Springfield, IL", stateFips: "17" },
+  // Pennsylvania (42)
+  { code: "0037980", censusName: "Philadelphia–Camden–Wilmington, PA-NJ-DE-MD", stateFips: "42", alsoIn: ["34"] },
+  { code: "0038300", censusName: "Pittsburgh, PA", stateFips: "42" },
+  { code: "0010900", censusName: "Allentown–Bethlehem–Easton, PA-NJ", stateFips: "42", alsoIn: ["34"] },
+  { code: "0025420", censusName: "Harrisburg–Carlisle, PA", stateFips: "42" },
+  { code: "0042540", censusName: "Scranton–Wilkes-Barre, PA", stateFips: "42" },
+  // Ohio (39)
+  { code: "0018140", censusName: "Columbus, OH", stateFips: "39" },
+  // 17460 (Cleveland–Elyria) returned no 2025 data: OMB's 2023 delineation
+  // re-coded it as 17410, Cleveland, OH.
+  { code: "0017410", censusName: "Cleveland, OH", stateFips: "39" },
+  { code: "0017140", censusName: "Cincinnati, OH-KY-IN", stateFips: "39" },
+  { code: "0010420", censusName: "Akron, OH", stateFips: "39" },
+  { code: "0019430", censusName: "Dayton–Kettering–Beavercreek, OH", stateFips: "39" },
+  // Georgia (13)
+  { code: "0012060", censusName: "Atlanta–Sandy Springs–Roswell, GA", stateFips: "13" },
+  { code: "0012260", censusName: "Augusta–Richmond County, GA-SC", stateFips: "13" },
+  { code: "0042340", censusName: "Savannah, GA", stateFips: "13" },
+  { code: "0017980", censusName: "Columbus, GA-AL", stateFips: "13" },
+  { code: "0031420", censusName: "Macon–Bibb County, GA", stateFips: "13" },
+  // North Carolina (37)
+  { code: "0016740", censusName: "Charlotte–Concord–Gastonia, NC-SC", stateFips: "37" },
+  { code: "0039580", censusName: "Raleigh–Cary, NC", stateFips: "37" },
+  { code: "0024660", censusName: "Greensboro–High Point, NC", stateFips: "37" },
+  { code: "0020500", censusName: "Durham–Chapel Hill, NC", stateFips: "37" },
+  { code: "0049180", censusName: "Winston-Salem, NC", stateFips: "37" },
+  // Michigan (26)
+  { code: "0019820", censusName: "Detroit–Warren–Dearborn, MI", stateFips: "26" },
+  { code: "0024340", censusName: "Grand Rapids–Wyoming–Kentwood, MI", stateFips: "26" },
+  { code: "0029620", censusName: "Lansing–East Lansing, MI", stateFips: "26" },
+  { code: "0011460", censusName: "Ann Arbor, MI", stateFips: "26" },
+  { code: "0022420", censusName: "Flint, MI", stateFips: "26" },
+  // New Jersey (34): NJ-only metros. New York, Philadelphia and Allentown above
+  // also list under NJ.
+  { code: "0045940", censusName: "Trenton–Princeton, NJ", stateFips: "34" },
+  { code: "0012100", censusName: "Atlantic City–Hammonton, NJ", stateFips: "34" },
+  { code: "0047220", censusName: "Vineland, NJ", stateFips: "34" },
 ];
 
 interface CatalogSeries {
@@ -101,7 +171,7 @@ async function main() {
   const observations = await fetchSeries(ids);
   const names = await catalogNames(ids);
 
-  const verified: { code: string; name: string }[] = [];
+  const verified: (typeof CANDIDATES[number] & { name: string })[] = [];
   const failed: string[] = [];
 
   for (const candidate of CANDIDATES) {
@@ -118,12 +188,16 @@ async function main() {
         `Census: ${candidate.censusName}`,
       ].join(" | "),
     );
-    if (ok) verified.push({ code: candidate.code, name: blsName ?? candidate.censusName });
+    if (ok) verified.push({ ...candidate, name: blsName ?? candidate.censusName });
     else failed.push(`${candidate.code} ${candidate.censusName}`);
   }
 
   console.log("\nVerified:");
-  for (const m of verified) console.log(`  { code: "${m.code}", name: ${JSON.stringify(m.name)} }`);
+  for (const m of verified) {
+    const state = m.stateFips ? `, stateFips: "${m.stateFips}"` : "";
+    const also = m.alsoIn ? `, alsoIn: ${JSON.stringify(m.alsoIn)}` : "";
+    console.log(`  { code: "${m.code}", name: ${JSON.stringify(m.name)}${state}${also} },`);
+  }
   console.log("\nFailed:");
   for (const f of failed) console.log(`  ${f}`);
 }

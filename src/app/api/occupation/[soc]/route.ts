@@ -7,6 +7,7 @@ import {
   type OccupationApiPayload,
 } from "@/lib/bls";
 import { findOccupation } from "@/lib/occupations";
+import { getOnetOccupation } from "@/lib/onet";
 
 /**
  * SPEC.md §4.1 for one occupation: employment and pay nationally, for the user's
@@ -59,15 +60,22 @@ export async function GET(
       return fail(400, `Metro code must be seven digits, got "${metroCode}".`);
     }
 
-    const snapshot = await getOccupationSnapshot({
-      socCode: soc,
-      stateFips,
-      metroCode,
-    });
+    // Jobs outside the seed table take their title and description from
+    // O*NET, asked in parallel with BLS so the two timeouts do not stack. A
+    // failed O*NET lookup only costs the title; the BLS figures still show.
+    const [snapshot, occupation] = await Promise.all([
+      getOccupationSnapshot({ socCode: soc, stateFips, metroCode }),
+      findOccupation(soc) ??
+        getOnetOccupation(soc).catch((cause: unknown) => {
+          const detail = cause instanceof Error ? cause.message : String(cause);
+          console.error("[occupation] O*NET title lookup failed:", detail);
+          return null;
+        }),
+    ]);
 
     const body: OccupationApiPayload = {
       soc,
-      occupation: findOccupation(soc),
+      occupation,
       source: snapshot.source,
       asOfYear: snapshot.asOfYear,
       national: snapshot.national,
