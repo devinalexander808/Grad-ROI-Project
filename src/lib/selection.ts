@@ -83,7 +83,7 @@ export interface ScorecardChoice {
   tuition: Figure;
   /** "College Scorecard". */
   source: string;
-  /** "latest release, retrieved Oct 2026". */
+  /** "latest available, retrieved Oct 2026". */
   asOf: string;
 }
 

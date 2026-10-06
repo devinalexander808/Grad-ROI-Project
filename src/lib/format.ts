@@ -50,3 +50,12 @@ export function formatPercent(percent: number): string {
   const rounded = Math.round(percent * 10) / 10;
   return `${rounded}%`;
 }
+
+/**
+ * "latest available, 2025": how current a figure is (PLAN Build 5). Every
+ * figure shows the newest release the source has published, which can be a
+ * year or more behind today, so the year always travels with the label.
+ */
+export function latestAvailable(year: number | null): string {
+  return year === null ? "latest available" : `latest available, ${year}`;
+}

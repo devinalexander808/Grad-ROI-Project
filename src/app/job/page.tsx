@@ -9,7 +9,7 @@ import type {
 } from "@/lib/bls";
 import { findOccupation } from "@/lib/occupations";
 import { useHydrated } from "@/lib/selection";
-import { formatCount, formatDollars } from "@/lib/format";
+import { formatCount, formatDollars, latestAvailable } from "@/lib/format";
 import OccupationPicker, {
   initialChoice,
   useOccupationLookup,
@@ -88,13 +88,14 @@ function JobView() {
         {load.state === "error" && (
           <Card>
             <h2 className="text-sm font-semibold text-ink">
-              No data to show right now
+              This data isn’t available right now
             </h2>
-            <p className="mt-2 text-sm text-ink-secondary">{load.message}</p>
-            <p className="mt-2 text-xs text-muted">
-              BLS caps unregistered use at 25 queries a day. Setting a free
-              BLS_API_KEY raises that to 500.
+            <p className="mt-2 text-sm text-ink-secondary">
+              We couldn’t get pay and job counts from the federal wage survey
+              (BLS OEWS) just now. You can still pick another job or place, and
+              the calculator works without it. Try again in a few minutes.
             </p>
+            <p className="mt-2 text-xs text-muted">Details: {load.message}</p>
           </Card>
         )}
 
@@ -192,8 +193,7 @@ function Snapshot({
             </table>
           </div>
           <p className="mt-3 text-xs text-muted">
-            Source: {data.source}
-            {data.asOfYear === null ? "" : `, ${data.asOfYear}`}. Pay is
+            Source: {data.source}, {latestAvailable(data.asOfYear)}. Pay is
             annual. n/a means BLS published no figure for that area, usually to
             protect employer confidentiality.
           </p>
@@ -259,7 +259,7 @@ function FigureCell({
   return (
     <td
       className="py-2 pl-4 text-lg font-semibold text-ink"
-      title={`${source}, ${observation.year ?? "year not given"}`}
+      title={`${source}, ${latestAvailable(observation.year)}`}
     >
       {format(observation.value)}
     </td>
@@ -308,7 +308,10 @@ function summarize(
     return `BLS has no published employment or wage figures for ${title} in ${stateLabel} or nationally.`;
   }
 
-  const year = data.asOfYear === null ? "" : ` (${data.asOfYear} survey)`;
+  const year =
+    data.asOfYear === null
+      ? " (latest available survey)"
+      : ` (${data.asOfYear} survey, the latest available)`;
   return `${title}: ${clauses.join(", ")}${year}.`;
 }
 

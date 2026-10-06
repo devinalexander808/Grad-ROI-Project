@@ -24,9 +24,12 @@
  * its wages come from the six-digit parent and the UI says so.
  *
  * Same contract as bls.ts: an 8 s timeout, the key redacted from everything
- * logged or returned, and a 24-hour in-process cache.
+ * logged or returned, a 24-hour in-process cache, and a 7-day Supabase cache
+ * (cache.ts) whose stale rows stand in when O*NET is down.
  */
 
+import { createHash } from "node:crypto";
+import { readCache, writeCache } from "./cache";
 import type { Occupation } from "./occupations";
 
 export const ONET_BASE = "https://api-v2.onetcenter.org/";
@@ -36,6 +39,15 @@ export const ONET_TIMEOUT_MS = 8_000;
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
+/** How long a Supabase row counts as fresh. */
+const STORE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+const STORE_SOURCE = "O*NET Web Services";
+
+/** The request path, hashed: it holds whatever title the user typed. */
+function storeKey(path: string): string {
+  return `onet:${createHash("sha256").update(path).digest("hex")}`;
+}
 /** How many search results to ask for; the picker shows them under the seeds. */
 export const ONET_SEARCH_LIMIT = 10;
 
@@ -99,12 +111,42 @@ export function clearOnetCache(): void {
 /**
  * GET a path under ONET_BASE and parse the JSON. Returns null on 404 (no such
  * occupation). Throws OnetError for everything else that is not a 200 with a
- * JSON body. Successful answers, including 404s, are cached for 24 hours.
+ * JSON body, unless Supabase holds an answer, even a stale one. Successful
+ * answers, including 404s, are cached for 24 hours in memory and 7 days in
+ * Supabase.
  */
 async function onetGet(path: string): Promise<unknown> {
   const hit = cache.get(path);
   if (hit && hit.expiresAt > Date.now()) return hit.value;
 
+  // Stored as { value } so a cached 404 (null) is still a row: the payload
+  // column is NOT NULL.
+  const remember = (payload: unknown): unknown => {
+    const value = (payload as { value?: unknown } | null)?.value ?? null;
+    cache.set(path, { value, expiresAt: Date.now() + CACHE_TTL_MS });
+    return value;
+  };
+
+  const key = storeKey(path);
+  const stored = (await readCache([key])).get(key);
+  if (stored) return remember(stored.payload);
+
+  try {
+    const value = await onetGetLive(path);
+    await writeCache(STORE_SOURCE, [{ key, payload: { value } }], STORE_TTL_MS);
+    return value;
+  } catch (cause) {
+    if (!(cause instanceof OnetError)) throw cause;
+    // O*NET is down: the latest stored answer beats none.
+    const stale = (await readCache([key], { allowStale: true })).get(key);
+    if (!stale) throw cause;
+    console.warn(`[onet] ${cause.message} Serving a stored answer instead.`);
+    return remember(stale.payload);
+  }
+}
+
+/** One live request to O*NET; answers (404s included) also go to memory. */
+async function onetGetLive(path: string): Promise<unknown> {
   const apiKey = process.env.ONET_API_KEY;
   if (!apiKey) {
     throw new OnetError(

@@ -198,7 +198,8 @@ export default function ProgramSearch({
             )}
             {schools.state === "error" && (
               <li className="px-3 py-2 text-xs text-muted">
-                School search isn’t available right now: {schools.message}
+                This data isn’t available right now, so schools can’t be
+                searched. You can still type the program details in yourself.
               </li>
             )}
             {schools.state === "ready" && schools.data.schools.length === 0 && (
@@ -264,7 +265,7 @@ export default function ProgramSearch({
         </span>
         <span className="mt-1 block text-xs text-muted">
           {programs.state === "error"
-            ? `Programs aren’t available right now: ${programs.message}`
+            ? "This data isn’t available right now. You can still type the program details in yourself."
             : "Grouped by field of study, as the Department of Education reports them."}
         </span>
       </label>

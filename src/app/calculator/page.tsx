@@ -25,6 +25,7 @@ import {
   formatDollars,
   formatPercent,
   formatSignedDollars,
+  latestAvailable,
 } from "@/lib/format";
 import {
   clearSelection,
@@ -350,7 +351,7 @@ export default function CalculatorPage() {
   } else if (selection && wage && fields.S1 === medianSalary) {
     provenance.S1 = {
       confidence: "Low",
-      text: `BLS OEWS${selection.year === null ? "" : ` ${selection.year}`} ${wage.level} median for ${midSentence(selection.title)} in ${wage.place}. That is typical pay for everyone in the job, not this program’s graduates.`,
+      text: `BLS OEWS, ${latestAvailable(selection.year)}: ${wage.level} median for ${midSentence(selection.title)} in ${wage.place}. That is typical pay for everyone in the job, not this program’s graduates.`,
     };
   } else {
     provenance.S1 = touched.S1 ? YOUR_INPUT : STARTING_NUMBER;
@@ -489,8 +490,8 @@ export default function CalculatorPage() {
             <span className="font-medium text-ink">
               {selection.title} in {wage.place}
             </span>{" "}
-            — BLS median {formatDollars(wage.median)}
-            {selection.year === null ? "" : ` (${selection.year})`}
+            — BLS median {formatDollars(wage.median)} (
+            {latestAvailable(selection.year)})
           </span>
           <span className="flex items-center gap-3 text-xs">
             <Link href="/job" className="text-accent hover:underline">
@@ -1230,7 +1231,7 @@ function ThreeNumbers({
       }`,
     selection &&
       wage &&
-      `Typical pay: BLS OEWS${selection.year === null ? "" : ` ${selection.year}`}, ${wage.level} median`,
+      `Typical pay: BLS OEWS ${wage.level} median, ${latestAvailable(selection.year)}`,
     breakeven !== null && "Breakeven: your inputs",
   ].filter(Boolean);
 

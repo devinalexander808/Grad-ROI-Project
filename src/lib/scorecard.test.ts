@@ -147,7 +147,7 @@ describe("summarizePrograms", () => {
 describe("asOfLabel", () => {
   it("names the release and the month it was retrieved", () => {
     expect(asOfLabel(new Date(Date.UTC(2026, 9, 3)))).toBe(
-      "latest release, retrieved Oct 2026",
+      "latest available, retrieved Oct 2026",
     );
   });
 });

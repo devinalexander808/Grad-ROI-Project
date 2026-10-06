@@ -16,10 +16,12 @@
  * Rate limits (SPEC §10): unregistered use is 25 queries/day and 25 series per
  * query. A free BLS_API_KEY raises that to 500/day and 50 per query. We stay
  * inside the unregistered limit either way — 25 series per request — and cache
- * every observation for 24 hours so a demo never depends on a live call. The
- * cache is process memory for now; SPEC §7 moves it to Supabase.
+ * every observation so a demo never depends on a live call: 24 hours in process
+ * memory, and 7 days in Supabase (cache.ts, Build 5). When BLS is down, a stale
+ * Supabase row is served rather than nothing.
  */
 
+import { readCache, writeCache } from "./cache";
 import type { Occupation } from "./occupations";
 
 export const BLS_ENDPOINT = "https://api.bls.gov/publicAPI/v2/timeseries/data/";
@@ -50,6 +52,15 @@ const MAX_SERIES_PER_REQUEST = 25;
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * How long a Supabase row counts as fresh. OEWS is published once a year, so a
+ * week only bounds how late a new release shows up.
+ */
+const STORE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+function storeKey(seriesId: string): string {
+  return `bls:${seriesId}`;
+}
 /**
  * How long to wait on BLS before giving up with a readable error.
  *
@@ -215,11 +226,12 @@ function chunk<T>(items: T[], size: number): T[][] {
 }
 
 /**
- * Latest annual value for each series ID, in batches of 25, each cached for 24
- * hours. Series already in cache cost no request; if every one is cached, no
- * call is made at all.
+ * Latest annual value for each series ID. Looked up in process memory, then in
+ * Supabase, then from BLS in batches of 25; a series found in either cache
+ * costs no request, and if every one is cached no call is made at all.
  *
- * Throws BlsError when the API itself fails. A series the API simply has no data
+ * Throws BlsError when the API itself fails and Supabase holds no answer for
+ * every missing series, even a stale one. A series the API simply has no data
  * for is not a failure — it comes back with a null value.
  */
 export async function fetchSeries(
@@ -228,7 +240,7 @@ export async function fetchSeries(
   const wanted = [...new Set(seriesIds)];
   const results = new Map<string, Observation>();
   const now = Date.now();
-  const missing: string[] = [];
+  let missing: string[] = [];
 
   for (const id of wanted) {
     const hit = cache.get(id);
@@ -238,7 +250,63 @@ export async function fetchSeries(
       missing.push(id);
     }
   }
+  if (missing.length === 0) return results;
 
+  const remember = (id: string, payload: unknown) => {
+    const observation = toObservation(id, payload);
+    cache.set(id, { observation, expiresAt: Date.now() + CACHE_TTL_MS });
+    results.set(id, observation);
+  };
+
+  const stored = await readCache(missing.map(storeKey));
+  for (const id of missing) {
+    const hit = stored.get(storeKey(id));
+    if (hit) remember(id, hit.payload);
+  }
+  missing = missing.filter((id) => !results.has(id));
+  if (missing.length === 0) return results;
+
+  try {
+    const fetched = await fetchFromBls(missing);
+    for (const [id, observation] of fetched) results.set(id, observation);
+    await writeCache(
+      "BLS OEWS",
+      [...fetched].map(([id, { value, year }]) => ({
+        key: storeKey(id),
+        payload: { value, year },
+      })),
+      STORE_TTL_MS,
+    );
+  } catch (cause) {
+    if (!(cause instanceof BlsError)) throw cause;
+    // BLS is down. The latest answer we stored beats no answer, as long as it
+    // covers every series asked for; a half-filled card would mislead.
+    const stale = await readCache(missing.map(storeKey), { allowStale: true });
+    if (!missing.every((id) => stale.has(storeKey(id)))) throw cause;
+    console.warn(
+      `[bls] ${cause.message} Serving ${missing.length} stored series instead.`,
+    );
+    for (const id of missing) remember(id, stale.get(storeKey(id))?.payload);
+  }
+
+  return results;
+}
+
+/** A stored `{ value, year }` back into an Observation; anything else is blank. */
+function toObservation(seriesId: string, payload: unknown): Observation {
+  const { value, year } = (payload ?? {}) as { value?: unknown; year?: unknown };
+  return {
+    seriesId,
+    value: typeof value === "number" ? value : null,
+    year: typeof year === "number" ? year : null,
+  };
+}
+
+/** One live round of BLS requests for the given series, cached in memory. */
+async function fetchFromBls(
+  missing: string[],
+): Promise<Map<string, Observation>> {
+  const results = new Map<string, Observation>();
   const apiKey = process.env.BLS_API_KEY;
 
   for (const batch of chunk(missing, MAX_SERIES_PER_REQUEST)) {
@@ -325,6 +393,7 @@ export async function fetchSeries(
       results.set(id, observation);
     }
   }
+
 
   return results;
 }

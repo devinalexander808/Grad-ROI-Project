@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
-import { formatDollars } from "@/lib/format";
+import { formatDollars, latestAvailable } from "@/lib/format";
 import {
   DEGREES,
   readProfile,
@@ -231,8 +231,8 @@ function MedianLine({ load, choice }: { load: Load; choice: JobChoice }) {
   if (load.state === "error") {
     return (
       <>
-        No BLS figure right now: {load.message} The calculator will use its own
-        starting salary instead.
+        This data isn’t available right now, so there’s no BLS figure to show.
+        The calculator will use its own starting salary instead.
       </>
     );
   }
@@ -264,8 +264,8 @@ function MedianLine({ load, choice }: { load: Load; choice: JobChoice }) {
       </strong>{" "}
       a year.{" "}
       <span className="text-xs text-muted">
-        BLS OEWS {useMetro ? "metro area" : "state"} median
-        {year === null ? "" : `, ${year}`}.
+        BLS OEWS {useMetro ? "metro area" : "state"} median,{" "}
+        {latestAvailable(year)}.
         {choice.metroCode !== null && !useMetro
           ? " No figure published for that metro area, so this is the state median."
           : ""}

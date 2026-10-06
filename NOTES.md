@@ -310,6 +310,42 @@ One entry per commit, oldest first. Built with Claude Code; deployed on Vercel.
   "Out-of-pocket school cost of −$45,000" when pay while studying covers
   the cost. **Fix:** it now says you net that amount per school-year.
 
+## 2026-10-06 — Add Supabase cache, friendly unavailable states, latest-available labels, page tests
+
+- **Built:** PLAN Build 5. New `src/lib/cache.ts` reads and writes one
+  Supabase table, `api_cache` (`supabase/migrations/20261006_api_cache.sql`,
+  RLS on with no policies), through the REST API with plain fetch and the
+  server-only `SUPABASE_SECRET_KEY`. BLS (fresh 7 days), College Scorecard
+  (30 days, per SPEC A3) and O*NET search (7 days) now look up memory, then
+  Supabase, then the live API, and write new answers back. When a source is
+  down, a stale stored row is served instead of an error. The cache never
+  breaks a page: no credentials, no table or Supabase down means reads come
+  back empty, writes are skipped, and each failure is logged once with the
+  key redacted. Figures say "latest available, 2025" (new `latestAvailable`
+  in `format.ts`) on the Job page, Start screen, calculator and Next moves;
+  Scorecard's label is now "latest available, retrieved Oct 2026". When BLS
+  or Scorecard is down, the Job page, Start screen and program search say
+  "This data isn't available right now" in plain words, and the rest of the
+  page keeps working. New page tests (`pages.test.tsx`, jsdom) and cache
+  tests (`cache.test.ts`, against a fake Supabase); 52 tests in all. New
+  dev-only dependencies, approved first: `jsdom`, `@testing-library/react`,
+  `@testing-library/dom`. New `vitest.config.mts` for the `@/` alias.
+- **Prompt intent:** A demo must not depend on a live government API: cache
+  every answer with a timestamp, and when a source is down, say so kindly
+  and keep the rest of the page working.
+- **Verified live:** `/api/occupation/132051?state=06` on a fresh server
+  read Supabase (miss), called BLS, and wrote 9 rows. After a restart, with
+  memory empty, the same call read Supabase only, with no BLS request. The
+  same check passed for O*NET search.
+- **Bug — Start screen test assumed an enabled button:** The first page test
+  looked for the "See if it pays off" link while BLS was down, but the link
+  only appears once a salary is entered. **Fix:** the test types a salary
+  first, which also proves the page still works without BLS.
+- **Known flake:** On a cold start after code changes, the jsdom page-test
+  worker can time out while loading Next and Recharts, and that file
+  silently doesn't run; a rerun passes. If it recurs, raise the start-up
+  timeout in `vitest.config.mts`.
+
 ## How I work with Claude Code
 
 1. **One bounded task at a time.** Each prompt names the files, the exact

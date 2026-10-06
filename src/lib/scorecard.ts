@@ -18,11 +18,16 @@
  *   sticker price; there is no per-program or graduate figure.
  * - Cohort years for program data. Programs exist only under `latest`, and
  *   the response carries no year, so figures are labelled with the release
- *   ("latest release") and the date we retrieved it.
+ *   ("latest available") and the date we retrieved it.
  *
  * Rate limit is 1,000 requests per hour per key. Responses are cached in
- * process memory for 24 hours; Build 5 moves the cache to Supabase.
+ * process memory for 24 hours and in Supabase for 30 days (cache.ts, Build 5;
+ * SPEC A3: "refresh monthly"). When Scorecard is down, a stale Supabase row is
+ * served rather than nothing.
  */
+
+import { createHash } from "node:crypto";
+import { readCache, writeCache } from "./cache";
 
 export const SCORECARD_ENDPOINT =
   "https://api.data.gov/ed/collegescorecard/v1/schools";
@@ -34,6 +39,13 @@ export const SCORECARD_TIMEOUT_MS = 8_000;
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
+/** How long a Supabase row counts as fresh (SPEC A3: refresh monthly). */
+const STORE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** The query string, hashed: it holds school names, commas and quotes. */
+function storeKey(search: string): string {
+  return `scorecard:${createHash("sha256").update(search).digest("hex")}`;
+}
 /** A3: "credential.level … treat ≥ 5 as graduate". */
 export const GRADUATE_LEVEL = 5;
 
@@ -84,7 +96,7 @@ export interface SchoolPrograms {
   /** Graduate programs only, sorted by title then credential. */
   programs: ProgramFigures[];
   source: string;
-  /** "latest release, retrieved Oct 2026" — when this response was fetched. */
+  /** "latest available, retrieved Oct 2026" — when this response was fetched. */
   asOf: string;
 }
 
@@ -269,13 +281,13 @@ export function summarizePrograms(raw: RawProgram[]): ProgramFigures[] {
     );
 }
 
-/** "latest release, retrieved Oct 2026". */
+/** "latest available, retrieved Oct 2026". */
 export function asOfLabel(retrieved: Date): string {
   const month = retrieved.toLocaleString("en-US", {
     month: "short",
     timeZone: "UTC",
   });
-  return `latest release, retrieved ${month} ${retrieved.getUTCFullYear()}`;
+  return `latest available, retrieved ${month} ${retrieved.getUTCFullYear()}`;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -343,6 +355,40 @@ async function query<Row>(params: Record<string, string>): Promise<Answer<Row>> 
     return { results: hit.value as Row[], fetchedAt: hit.fetchedAt };
   }
 
+  const remember = (results: Row[], fetchedAt: Date): Answer<Row> => {
+    cache.set(cacheKey, {
+      value: results,
+      fetchedAt,
+      expiresAt: Date.now() + CACHE_TTL_MS,
+    });
+    return { results, fetchedAt };
+  };
+
+  const key = storeKey(cacheKey);
+  const stored = (await readCache([key])).get(key);
+  if (stored && Array.isArray(stored.payload)) {
+    return remember(stored.payload as Row[], stored.fetchedAt);
+  }
+
+  try {
+    const answer = await queryLive<Row>(url, apiKey);
+    await writeCache("College Scorecard", [{ key, payload: answer.results }], STORE_TTL_MS, answer.fetchedAt);
+    return remember(answer.results, answer.fetchedAt);
+  } catch (cause) {
+    if (!(cause instanceof ScorecardError)) throw cause;
+    // Scorecard is down: the latest stored answer beats none. Its retrieval
+    // date travels with it, so the "as of" label stays honest.
+    const stale = (await readCache([key], { allowStale: true })).get(key);
+    if (!stale || !Array.isArray(stale.payload)) throw cause;
+    console.warn(`[scorecard] ${cause.message} Serving a stored answer instead.`);
+    return remember(stale.payload as Row[], stale.fetchedAt);
+  }
+}
+
+/** One live request to College Scorecard. */
+async function queryLive<Row>(url: URL, apiKey: string): Promise<Answer<Row>> {
+  url = new URL(url);
+
   url.searchParams.set("api_key", apiKey);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SCORECARD_TIMEOUT_MS);
@@ -381,14 +427,7 @@ async function query<Row>(params: Record<string, string>): Promise<Answer<Row>> 
     throw new ScorecardError("College Scorecard returned a response that isn’t JSON.");
   }
 
-  const results = payload.results ?? [];
-  const fetchedAt = new Date();
-  cache.set(cacheKey, {
-    value: results,
-    fetchedAt,
-    expiresAt: fetchedAt.getTime() + CACHE_TTL_MS,
-  });
-  return { results, fetchedAt };
+  return { results: payload.results ?? [], fetchedAt: new Date() };
 }
 
 interface RawSchoolRow {

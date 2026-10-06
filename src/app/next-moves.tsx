@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { formatDollars } from "@/lib/format";
+import { formatDollars, latestAvailable } from "@/lib/format";
 import { selectedWage, type Selection } from "@/lib/selection";
 
 /** Within this many dollars, the median counts as sitting on the breakeven line. */
@@ -69,7 +69,7 @@ export default function NextMoves({
         </p>
       </div>
       <p className="mt-3 text-xs text-muted">
-        Wage: BLS OEWS{selection.year === null ? "" : ` ${selection.year}`},{" "}
+        Wage: BLS OEWS, {latestAvailable(selection.year)},{" "}
         {level === "metro area" ? `metro area median (${area})` : "state median"}.
         Breakeven: your inputs above.
       </p>
