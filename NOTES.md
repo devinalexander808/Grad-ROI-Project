@@ -346,6 +346,34 @@ One entry per commit, oldest first. Built with Claude Code; deployed on Vercel.
   silently doesn't run; a rerun passes. If it recurs, raise the start-up
   timeout in `vitest.config.mts`.
 
+## 2026-10-07 — Add email sign-in with Supabase magic links
+
+- **Built:** PLAN Build 6, part (a) only. Passwordless email sign-in with
+  Supabase Auth magic links. A "Sign in" link at the right of the nav opens
+  `/sign-in`, one email box that sends the link and says "Check your email"
+  (a new email creates the account). The link lands on `/auth/callback`,
+  which exchanges the one-time code for a session cookie (PKCE: the link
+  only works in the browser that asked for it) and returns the user to the
+  page they started from. The nav then shows their email and "Sign out".
+  Browser and callback route use only the publishable key
+  (`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`). The secret key is never used
+  for sign-in, and `next.config.ts` passes only the project URL to the
+  browser. New runtime dependencies, named first: `@supabase/supabase-js`
+  (sends the link, exchanges the code, refreshes, signs out) and
+  `@supabase/ssr` (keeps the session in cookies so the server can finish
+  sign-in). 13 new tests with the Supabase client faked; 65 in all. Saved
+  paths and alerts are not built yet.
+- **Prompt intent:** Let people sign in without a password, as the first
+  step toward saved paths, without making an account necessary to use the
+  app.
+- **Setup still needed:** the publishable key is in `.env.local`; add it to
+  Vercel too, and add `http://localhost:3000/auth/callback**` plus the Vercel
+  callback URL to Supabase's redirect URLs. A real end-to-end sign-in (email
+  sent, link clicked) has not been tried yet.
+- **Bugs:** None. The callback follows only same-site `next=` paths, so a
+  crafted link can't redirect off the site; that is tested with
+  `//evil.example` and `https://evil.example`.
+
 ## How I work with Claude Code
 
 1. **One bounded task at a time.** Each prompt names the files, the exact

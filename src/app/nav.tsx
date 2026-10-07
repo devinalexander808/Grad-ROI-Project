@@ -1,8 +1,10 @@
 import Link from "next/link";
+import AuthStatus from "./auth-status";
 
 /**
  * One line of navigation: the Start screen, then one link per section of SPEC.md §4. "The path",
- * "the news" and "next moves" arrive in weeks 8 and 9 (§8).
+ * "the news" and "next moves" arrive in weeks 8 and 9 (§8). Sign-in sits at
+ * the right end.
  */
 export default function Nav() {
   return (
@@ -14,6 +16,7 @@ export default function Nav() {
         <NavLink href="/">Start</NavLink>
         <NavLink href="/job">Job</NavLink>
         <NavLink href="/calculator">Calculator</NavLink>
+        <AuthStatus />
       </div>
     </nav>
   );
